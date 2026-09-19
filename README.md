@@ -4,7 +4,7 @@
 
 Large decision models (like TypeSafe's Jev) showed that software doesn't need a text generator for filter / verification / triage steps — it needs fast, structured judgments. But their inference runs on someone else's servers, costs money per token, and works best in English.
 
-`local-judge` implements the same request/response shape over local models (Ollama), so anything written against the Jev API docs works here by changing the base URL — while every byte stays on your machine and costs nothing.
+`local-judge` implements the same request/response shape over local models (Ollama) — as a documented subset — so most Jev-targeted tooling works here by changing the base URL, while every byte stays on your machine and costs nothing.
 
 **Status: design stage. Nothing is built yet.**
 
@@ -30,9 +30,9 @@ The interface is the standard: state + typed questions (`choice` / `score` / `no
 
 ## Design decisions
 
-1. **Wire-compatible with the public Jev API shape** — same request fields, same response fields. Jev-targeted tooling works against local-judge by changing one base URL.
+1. **Jev-compatible request/response subset** — the `choice` and `noul` question types follow the public Jev wire shape; `score` arrives with its first consumer. Field-level differences are documented, never silently divergent, and the compatibility contract gets pinned by published fixtures.
 2. **Menu enforcement in code, not prompting.** The engine physically cannot return an answer outside the options you supplied.
-3. **Honest confidence, documented as different.** The `confidence` field occupies the same slot as Jev's, but is derived from agreement across repeated samples of a local model — pseudo-calibration, not RLCD. Same field, same range, weaker guarantee. Stated in the docs, not hidden.
+3. **Agreement, not calibrated confidence.** The native result exposes `agreement` — vote share across repeated samples — and never presents it as a calibrated probability. A Jev-compat adapter maps it onto the `confidence` field with a documented weaker guarantee, so a consumer cannot mistake one for the other.
 4. **Three faces, one core**: HTTP for workflow tools (n8n), MCP for AI agents, importable library for Python projects.
 5. **Fail closed**: model returns garbage → fallback, never an invented answer; model server down → error, not a guess.
 6. **Consumer-agnostic scope**: v0 ships `noul` + `choice`; `score` lands with its first real consumer.
