@@ -6,7 +6,7 @@ Large decision models (like TypeSafe's Jev) showed that software doesn't need a 
 
 `local-judge` implements the same request/response shape over local models (Ollama) — as a documented subset — so most Jev-targeted tooling works here by changing the base URL, while every byte stays on your machine and costs nothing.
 
-**Status: design stage. Nothing is built yet.**
+**Status: project definition complete. Nothing is built yet.**
 
 ---
 
@@ -35,11 +35,11 @@ The interface is the standard: state + typed questions (`choice` / `score` / `no
 3. **Agreement, not calibrated confidence.** The native result exposes `agreement` — vote share across repeated samples — and never presents it as a calibrated probability. A Jev-compat adapter maps it onto the `confidence` field with a documented weaker guarantee, so a consumer cannot mistake one for the other.
 4. **Three faces, one core**: HTTP for workflow tools (n8n), MCP for AI agents, importable library for Python projects.
 5. **Fail closed**: model returns garbage → fallback, never an invented answer; model server down → error, not a guess.
-6. **Consumer-agnostic scope**: v0 ships `noul` + `choice`; `score` lands with its first real consumer.
+6. **Consumer-agnostic scope**: the project definition covers `noul`, `choice`, and `score`; stage-loop determines implementation order and acceptance evidence.
 
 ## Scope
 
-**In:** the wire-compatible evaluation endpoint, menu enforcement, sample-based confidence, the HTTP / MCP / library faces, a spec test suite.
+**In:** the documented Jev-compatible evaluation endpoint, menu enforcement, sample-based agreement, the HTTP / MCP / library faces, and a spec test suite.
 
 **Out, for now:** text generation, model training/fine-tuning, speed or calibration parity with hosted decision models, multi-tenancy, a hosted service.
 
