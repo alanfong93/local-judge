@@ -27,7 +27,7 @@ flowchart LR
 
 1. **Jev-compatible request/response subset** — `choice`, `score`, and `noul` retain their distinct semantics and documented validity rules. Field-level differences are explicit, never silently divergent, and the compatibility contract gets pinned by published fixtures.
 2. **Question-specific validation in code, not prompting.** Menu enforcement applies to menu-based questions; score levels and Noul values have their own validity rules.
-3. **Agreement, not calibrated confidence.** The native result exposes `agreement` — vote share across repeated samples — and never presents it as a calibrated probability. A Jev-compat adapter maps it onto the `confidence` field with a documented weaker guarantee, so a consumer cannot mistake one for the other.
+3. **Agreement, not calibrated confidence.** The native result exposes `agreement` — vote share across repeated samples — and never presents it as a calibrated probability. Noul's estimated probability that a statement is true is a separate value, not agreement or probability of answer correctness. A Jev-compat adapter may map agreement onto the `confidence` field, with the distinction disclosed in the compatibility contract.
 4. **Three faces, one core**: HTTP for workflow tools (n8n), MCP for AI agents, importable library for Python projects.
 5. **Fail closed**: invalid model output or inability to answer is reported, never converted into an invented valid-looking judgment; model server down → error, not a guess.
 6. **Consumer-agnostic scope**: the project definition covers `noul`, `choice`, and `score`; stage-loop determines implementation order and acceptance evidence.

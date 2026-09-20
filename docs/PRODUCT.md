@@ -16,7 +16,7 @@ Accept state, instructions, criteria, and typed questions; obtain judgments from
 - Offer a documented Jev-compatible subset, with unsupported features and semantic differences explicit. Compatibility is limited to that subset.
 - Be accessible through HTTP, MCP, and an importable Python library.
 - Keep inference and request data local, without per-request hosted inference API charges.
-- Report repeated-sample agreement as **agreement**, not calibrated confidence or probability of correctness. Any compatibility-field mapping must disclose that distinction.
+- Report repeated-sample agreement as **agreement**, not calibrated confidence or probability of correctness. Noul's estimated probability that a statement is true is distinct from both agreement and the probability that an answer is correct. Any compatibility-field mapping must disclose those distinctions.
 - Reject invalid outputs or report inability to answer rather than inventing a valid-looking judgment. Typed validity is not evidence that an answer is correct.
 
 # Done when
