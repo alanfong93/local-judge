@@ -1,19 +1,28 @@
 # Who
+Alan's automation estate — n8n workflows, AI agents (OpenCode), and Python projects (ops-guard) that need structured judgments without sending their data to an external inference service.
 
-Alan's automation estate — n8n workflows, AI agents (OpenCode), and Python projects (ops-guard) that need fast, cheap, structured judgments and will not send data to a paid external API.
+# What
+A local, consumer-independent decision engine that answers typed questions about supplied state using Ollama.
 
-# Must be able to
+# Problem
+Workflows, agents, and Python applications need structured judgments without maintaining separate judgment logic for each consumer or sending the judged data to a paid external service.
 
-1. Send a state plus typed questions (`choice` / `score` / `noul`, with instructions and criteria) and get back typed answers, probabilities, and confidence — **wire-compatible with the public Jev API shape**, so Jev-targeted tooling works by changing the base URL
-2. Run entirely local (Ollama) — no data leaves the machine, zero marginal cost
-3. Be reached three ways: HTTP (n8n workflows), MCP (AI agents), importable library (Python projects)
-4. Refuse answers outside the supplied menu — enforced in code, not by prompting
-5. Report honest confidence: agreement across repeated samples, documented as pseudo-calibration rather than trained calibration
+# How
+Accept state, instructions, criteria, and typed questions; obtain judgments from local models; enforce each question type's output constraints; and return structured results with honestly labelled uncertainty information.
+
+# Required capabilities and constraints
+
+- Support **Choice, Score, and Noul as distinct question types**, preserving their respective semantics and validity constraints. Menu enforcement applies where the question supplies a menu.
+- Offer a documented Jev-compatible subset, with unsupported features and semantic differences explicit. Compatibility is limited to that subset.
+- Be accessible through HTTP, MCP, and an importable Python library.
+- Keep inference and request data local, without per-request hosted inference API charges.
+- Report repeated-sample agreement as **agreement**, not calibrated confidence or probability of correctness. Any compatibility-field mapping must disclose that distinction.
+- Reject invalid outputs or report inability to answer rather than inventing a valid-looking judgment. Typed validity is not evidence that an answer is correct.
 
 # Done when
 
-A request written from the public Jev API docs, pointed at local-judge, returns a correctly-shaped response from a local model; returning an answer outside the supplied menu is impossible by construction; and the first real caller (Article Saver tag selection over the closed tag menu) works end-to-end through it.
+Choice, Score, and Noul work according to their documented semantics through all three access routes; supported Jev-subset requests behave as documented; invalid outputs cannot escape validation; local operation, failure reporting, and agreement labelling are demonstrated; and representative judgments have evidence of usefulness beyond response-shape compliance.
 
 # Not this project
 
-Text generation of any kind. Model training or fine-tuning. Speed or calibration parity with hosted decision models. A hosted service. Multi-tenancy.
+General-purpose text generation. Model training or fine-tuning. Full Jev parity. Hosted-model speed or calibration parity. A hosted service. Multi-tenancy.
