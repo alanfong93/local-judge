@@ -12,7 +12,7 @@ Accept state, instructions, criteria, and typed questions; obtain judgments from
 
 # Required capabilities and constraints
 
-- Support **Choice, Score, and Noul as distinct question types**, preserving their respective semantics and validity constraints. Menu enforcement applies where the question supplies a menu.
+- Support **Choice, Score, and Noul as distinct question types**, preserving their respective semantics and validity constraints: Choice selects one option from a defined set, Score places the state on an ordered rubric, and Noul estimates whether a statement is true. Menu enforcement applies where the question supplies a menu.
 - Offer a documented Jev-compatible subset, with unsupported features and semantic differences explicit. Compatibility is limited to that subset.
 - Be accessible through HTTP, MCP, and an importable Python library.
 - Keep inference and request data local, without per-request hosted inference API charges.

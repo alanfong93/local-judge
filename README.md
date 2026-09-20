@@ -14,17 +14,13 @@ Large decision models (like TypeSafe's Jev) showed that software doesn't need a 
 
 The interface is the standard: shared state plus independent typed questions (`choice` / `score` / `noul`, each with instructions and criteria) → typed results with question-specific validity and uncertainty information. Questions are evaluated against the same state; criteria and relevant state determine the quality of the judgment. You don't design a power bank for one phone; you fit the standard port and any device works. Same here: consumers validate the port, they don't shape it.
 
-```
-                     ┌──────────────────────────────┐
-                     │   local-judge (one core)     │
-                      │  POST /v1/systemone (subset) │
-                     │  state + questions →         │
-                      │  typed results + uncertainty │
-                     └───────┬─────────┬───────┬────┘
-                        HTTP│       MCP│    lib│
-                            │         │       │
-                     n8n workflows  agents  Python projects
-                                  (OpenCode)  (ops-guard)
+```mermaid
+flowchart LR
+    INPUT["State + typed questions"] --> CORE["local-judge<br>documented Jev-compatible subset"]
+    CORE --> HTTP["HTTP<br>n8n workflows"]
+    CORE --> MCP["MCP<br>AI agents"]
+    CORE --> LIB["Python library<br>Python projects"]
+    CORE -.-> RESULT["Typed results +<br>uncertainty information"]
 ```
 
 ## Design decisions
