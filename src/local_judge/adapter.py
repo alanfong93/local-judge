@@ -1,0 +1,129 @@
+"""The documented Jev compatibility adapter (docs/CONTRACT.md 'Jev Adapter').
+
+Accepts the documented Jev-shaped input map (closed object: state, model,
+questions), validates it with the native structural rules, converts it to a
+native v1 evaluation with fixed adapter defaults, and maps only fully
+answered native results to the documented Jev answer shapes. Every failure
+refuses rather than invents; agreement is disclosed as agreement, never as
+Jev or calibrated confidence.
+"""
+
+from typing import Any, Mapping
+
+from local_judge.errors import ErrorObject, StructuralCode, StructuralError
+from local_judge.models import RequestEnvelope, ResultEntry, ResultStatus
+from local_judge.validation import RequestValidator
+
+
+class JevAdapter:
+    POLICY_VERSION = "jev-adapter-v1"
+    SAMPLE_COUNT = 3
+    TEMPERATURE = 0
+    TIMEOUT_MS = 30000
+    DISCLOSURE = "confidence is local repeated-sample agreement, not Jev or calibrated confidence"
+
+    _INPUT_KEYS = frozenset({"state", "model", "questions"})
+
+    def __init__(self, validator: RequestValidator, model_profiles: Mapping[str, Any]) -> None:
+        self._validator = validator
+        self._model_profiles = model_profiles
+
+    def convert_input(self, jev_input: Mapping[str, Any]) -> RequestEnvelope:
+        """Validate the Jev-shaped input with native structural rules, then convert.
+
+        Unknown, missing, or invalid input members surface the native structural
+        codes before any conversion or model call; JEV_ADAPTER_UNMAPPABLE_RESULT
+        is never used for input validation.
+        """
+        for key in jev_input:
+            if key not in self._INPUT_KEYS:
+                escape = key.replace("~", "~0").replace("/", "~1")
+                raise StructuralError(
+                    StructuralCode.UNKNOWN_FIELD, f"unknown Jev input field: {key!r}", f"/{escape}"
+                )
+        native = {
+            "contract_version": "v1",
+            "state": jev_input.get("state"),
+            "model": jev_input.get("model"),
+            "policy": {"version": self.POLICY_VERSION},
+            "inference": {
+                "sample_count": self.SAMPLE_COUNT,
+                "temperature": self.TEMPERATURE,
+                "timeout_ms": self.TIMEOUT_MS,
+            },
+            "questions": jev_input.get("questions"),
+        }
+        return self._validator.parse(native)
+
+    def evaluate(self, jev_input: Mapping[str, Any], runner) -> dict:
+        """One adapter evaluation: structural validation, native run, mapping."""
+        try:
+            envelope = self.convert_input(jev_input)
+        except StructuralError as exc:
+            return self._structural_failure(exc)
+        results = runner(envelope)
+        return self.map_results(results)
+
+    def evaluate_with_results(self, jev_input: Mapping[str, Any], results: Mapping[str, ResultEntry]) -> dict:
+        """Map caller-supplied native results (fake-runner test seam)."""
+        try:
+            self.convert_input(jev_input)
+        except StructuralError as exc:
+            return self._structural_failure(exc)
+        return self.map_results(results)
+
+    def map_results(self, results: Mapping[str, ResultEntry]) -> dict:
+        traces = {}
+        answers = {}
+        mappable = True
+        for question_id, entry in results.items():
+            traces[question_id] = entry.trace.to_dict()
+            if entry.status is not ResultStatus.ANSWERED or entry.answer is None:
+                mappable = False
+                continue
+            answers[question_id] = self._convert_answer(entry)
+        if not mappable:
+            return {
+                "answers": None,
+                "local_judge": self._local_judge(traces),
+                "error": ErrorObject(
+                    code="JEV_ADAPTER_UNMAPPABLE_RESULT",
+                    path="",
+                    message="a requested question did not answer; partial results are never mapped",
+                ).to_dict(),
+            }
+        return {
+            "answers": answers,
+            "local_judge": self._local_judge(traces),
+            "error": None,
+        }
+
+    def _convert_answer(self, entry: ResultEntry) -> dict:
+        answer = entry.answer
+        if entry.type_ == "choice":
+            return {
+                "type": "choice",
+                "choice": answer["choice"],
+                "probabilities": answer["vote_share"],
+                "confidence": entry.agreement,
+            }
+        if entry.type_ == "score":
+            return {
+                "type": "score",
+                "score": answer["score"],
+                "probabilities": answer["vote_share"],
+                "legend": answer["legend"],
+                "confidence": entry.agreement,
+            }
+        return {"type": "noul", "noul": answer["noul"]}
+
+    def _local_judge(self, traces: Mapping[str, dict]) -> dict:
+        return {
+            "contract_version": "v1",
+            "traces": dict(traces),
+            "confidence_disclosure": self.DISCLOSURE,
+        }
+
+    @staticmethod
+    def _structural_failure(exc: StructuralError) -> dict:
+        return {"answers": None, "local_judge": None, "error": exc.error.to_dict()}
