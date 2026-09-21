@@ -1,0 +1,18 @@
+{
+  "contract_version": "v1",
+  "state": { "ticket": "Checkout is down for some users; a cached page still works." },
+  "model": "qwen3:8b",
+  "policy": { "version": "support-triage-2026-09-21" },
+  "inference": { "sample_count": 2, "temperature": 0, "timeout_ms": 30000 },
+  "questions": {
+    "severity": {
+      "type": "score",
+      "instructions": "How severe is this issue on the supplied rubric?",
+      "criteria": [
+        "Cosmetic impact",
+        "Workaround exists",
+        "No workaround exists"
+      ]
+    }
+  }
+}

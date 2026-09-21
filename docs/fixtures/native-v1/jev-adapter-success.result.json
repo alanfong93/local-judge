@@ -1,0 +1,264 @@
+{
+  "answers": {
+    "department": {
+      "type": "choice",
+      "choice": "technical",
+      "probabilities": {
+        "billing": 0,
+        "technical": 1
+      },
+      "confidence": 1
+    },
+    "is_refund": {
+      "type": "noul",
+      "noul": 0.9
+    }
+  },
+  "local_judge": {
+    "contract_version": "v1",
+    "traces": {
+      "department": {
+        "trace_id": "00000000-0000-4000-8000-000000000001",
+        "parent_trace_id": null,
+        "trace_schema_version": "v1",
+        "contract_version": "v1",
+        "prompt_template_version": "p1",
+        "output_schema_version": "o1",
+        "aggregation_version": "a1",
+        "policy_version": "jev-adapter-v1",
+        "accepted_request": {
+          "contract_version": "v1",
+          "state": {
+            "ticket": "I want my money back for order 1234; also the app will not start."
+          },
+          "model": "qwen3:8b",
+          "policy": {
+            "version": "jev-adapter-v1"
+          },
+          "inference": {
+            "sample_count": 3,
+            "temperature": 0,
+            "timeout_ms": 30000
+          },
+          "questions": {
+            "department": {
+              "type": "choice",
+              "instructions": "Which team should handle this ticket?",
+              "criteria": {
+                "billing": "Payments, invoices, and refunds",
+                "technical": "Bugs, outages, and integrations"
+              }
+            },
+            "is_refund": {
+              "type": "noul",
+              "instructions": "Is the customer requesting a refund?",
+              "criteria": {
+                "true": "Explicitly asks for money back",
+                "false": "Does not ask for money back"
+              }
+            }
+          }
+        },
+        "canonical_request_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaabcccccccccccccccccccccccccccccccc",
+        "state": {
+          "ticket": "I want my money back for order 1234; also the app will not start."
+        },
+        "question": {
+          "type": "choice",
+          "instructions": "Which team should handle this ticket?",
+          "criteria": {
+            "billing": "Payments, invoices, and refunds",
+            "technical": "Bugs, outages, and integrations"
+          }
+        },
+        "criteria": {
+          "billing": "Payments, invoices, and refunds",
+          "technical": "Bugs, outages, and integrations"
+        },
+        "policy_provenance": "caller-declared-unverified",
+        "rendered_messages": [
+          {
+            "role": "system",
+            "content": "Return exactly one option id from the supplied criteria as JSON."
+          },
+          {
+            "role": "user",
+            "content": {
+              "instructions": "Which team should handle this ticket?",
+              "criteria": {
+                "billing": "Payments, invoices, and refunds",
+                "technical": "Bugs, outages, and integrations"
+              },
+              "state": {
+                "ticket": "Customer cannot log in after the migration."
+              }
+            }
+          }
+        ],
+        "resolved_inference": {
+          "sample_count": 3,
+          "temperature": 0,
+          "seed": null,
+          "timeout_ms": 30000
+        },
+        "backend": "ollama",
+        "model": "qwen3:8b",
+        "model_digest": null,
+        "local_runtime_version": "fixtures-0.0.0",
+        "attempts": [
+          {
+            "raw_output": "{\"choice\":\"technical\"}",
+            "parsed_value": {
+              "choice": "technical"
+            },
+            "validation_outcome": "valid",
+            "timestamp": "2026-09-22T12:07:00Z",
+            "terminal_error": null
+          },
+          {
+            "raw_output": "{\"choice\":\"technical\"}",
+            "parsed_value": {
+              "choice": "technical"
+            },
+            "validation_outcome": "valid",
+            "timestamp": "2026-09-22T12:07:01Z",
+            "terminal_error": null
+          },
+          {
+            "raw_output": "{\"choice\":\"technical\"}",
+            "parsed_value": {
+              "choice": "technical"
+            },
+            "validation_outcome": "valid",
+            "timestamp": "2026-09-22T12:07:02Z",
+            "terminal_error": null
+          }
+        ],
+        "aggregate": {
+          "choice": "technical",
+          "vote_share": {
+            "billing": 0,
+            "technical": 1
+          }
+        }
+      },
+      "is_refund": {
+        "trace_id": "00000000-0000-4000-8000-000000000003",
+        "parent_trace_id": null,
+        "trace_schema_version": "v1",
+        "contract_version": "v1",
+        "prompt_template_version": "p1",
+        "output_schema_version": "o1",
+        "aggregation_version": "a1",
+        "policy_version": "jev-adapter-v1",
+        "accepted_request": {
+          "contract_version": "v1",
+          "state": {
+            "ticket": "I want my money back for order 1234; also the app will not start."
+          },
+          "model": "qwen3:8b",
+          "policy": {
+            "version": "jev-adapter-v1"
+          },
+          "inference": {
+            "sample_count": 3,
+            "temperature": 0,
+            "timeout_ms": 30000
+          },
+          "questions": {
+            "department": {
+              "type": "choice",
+              "instructions": "Which team should handle this ticket?",
+              "criteria": {
+                "billing": "Payments, invoices, and refunds",
+                "technical": "Bugs, outages, and integrations"
+              }
+            },
+            "is_refund": {
+              "type": "noul",
+              "instructions": "Is the customer requesting a refund?",
+              "criteria": {
+                "true": "Explicitly asks for money back",
+                "false": "Does not ask for money back"
+              }
+            }
+          }
+        },
+        "canonical_request_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaabcccccccccccccccccccccccccccccccc",
+        "state": {
+          "ticket": "I want my money back for order 1234; also the app will not start."
+        },
+        "question": {
+          "type": "noul",
+          "instructions": "Is the customer requesting a refund?",
+          "criteria": {
+            "true": "Explicitly asks for money back",
+            "false": "Does not ask for money back"
+          }
+        },
+        "criteria": {
+          "true": "Explicitly asks for money back",
+          "false": "Does not ask for money back"
+        },
+        "policy_provenance": "caller-declared-unverified",
+        "rendered_messages": [
+          {
+            "role": "system",
+            "content": "Return one finite number from 0 through 1 as JSON."
+          },
+          {
+            "role": "user",
+            "content": {
+              "instructions": "Is the customer requesting a refund?",
+              "criteria": {
+                "true": "Explicitly asks for money back",
+                "false": "Does not ask for money back"
+              },
+              "state": {
+                "message": "I want my money back for order 1234."
+              }
+            }
+          }
+        ],
+        "resolved_inference": {
+          "sample_count": 3,
+          "temperature": 0,
+          "seed": null,
+          "timeout_ms": 30000
+        },
+        "backend": "ollama",
+        "model": "qwen3:8b",
+        "model_digest": null,
+        "local_runtime_version": "fixtures-0.0.0",
+        "attempts": [
+          {
+            "raw_output": "0.9",
+            "parsed_value": 0.9,
+            "validation_outcome": "valid",
+            "timestamp": "2026-09-22T12:08:00Z",
+            "terminal_error": null
+          },
+          {
+            "raw_output": "0.9",
+            "parsed_value": 0.9,
+            "validation_outcome": "valid",
+            "timestamp": "2026-09-22T12:08:01Z",
+            "terminal_error": null
+          },
+          {
+            "raw_output": "0.9",
+            "parsed_value": 0.9,
+            "validation_outcome": "valid",
+            "timestamp": "2026-09-22T12:08:02Z",
+            "terminal_error": null
+          }
+        ],
+        "aggregate": {
+          "noul": 0.9
+        }
+      }
+    },
+    "confidence_disclosure": "confidence is local repeated-sample agreement, not Jev or calibrated confidence"
+  },
+  "error": null
+}

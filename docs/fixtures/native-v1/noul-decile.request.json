@@ -1,0 +1,17 @@
+{
+  "contract_version": "v1",
+  "state": { "message": "I want my money back for order 1234." },
+  "model": "qwen3:8b",
+  "policy": { "version": "support-triage-2026-09-21" },
+  "inference": { "sample_count": 3, "temperature": 0, "timeout_ms": 30000 },
+  "questions": {
+    "is_refund": {
+      "type": "noul",
+      "instructions": "Is the customer requesting a refund?",
+      "criteria": {
+        "true": "Explicitly asks for money back",
+        "false": "Does not ask for money back"
+      }
+    }
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "state": { "ticket": "I want my money back for order 1234; also the app will not start." },
+  "model": "qwen3:8b",
+  "questions": {
+    "department": {
+      "type": "choice",
+      "instructions": "Which team should handle this ticket?",
+      "criteria": {
+        "billing": "Payments, invoices, and refunds",
+        "technical": "Bugs, outages, and integrations"
+      }
+    },
+    "is_refund": {
+      "type": "noul",
+      "instructions": "Is the customer requesting a refund?",
+      "criteria": {
+        "true": "Explicitly asks for money back",
+        "false": "Does not ask for money back"
+      }
+    }
+  }
+}

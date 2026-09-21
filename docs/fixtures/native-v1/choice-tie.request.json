@@ -1,0 +1,17 @@
+{
+  "contract_version": "v1",
+  "state": { "ticket": "Two teams could own this; the caller needs a priority." },
+  "model": "qwen3:8b",
+  "policy": { "version": "support-triage-2026-09-21" },
+  "inference": { "sample_count": 2, "temperature": 0.7, "timeout_ms": 30000 },
+  "questions": {
+    "priority": {
+      "type": "choice",
+      "instructions": "Which option applies?",
+      "criteria": {
+        "p1": "Handle first",
+        "p2": "Handle second"
+      }
+    }
+  }
+}
