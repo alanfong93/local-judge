@@ -103,3 +103,46 @@ def test_explicit_inability_gives_inability_to_answer():
     result = e.run("department", {"type": "choice", "criteria": MENU}, "s", attempts)
     assert result.status is ResultStatus.INABILITY_TO_ANSWER
     assert result.error.code == "INSUFFICIENT_EVIDENCE"
+
+
+MENU_QUESTION_RAW = {"type": "choice", "instructions": "Which team?", "criteria": MENU}
+
+
+def test_criteria_shape_validated_at_construction():
+    with pytest.raises(ValueError):
+        ChoiceExecutor(criteria=["billing", "technical"])  # a list is not a menu
+    with pytest.raises(ValueError):
+        ChoiceExecutor(criteria={"only": "one"})
+    with pytest.raises(ValueError):
+        ChoiceExecutor(criteria={"": "empty id", "billing": "b"})
+
+
+def test_runs_through_the_shared_orchestration_boundary():
+    from local_judge import RequestEnvelope, Inference, Policy, QuestionEntry
+    from local_judge.orchestrator import SamplingOrchestrator
+
+    class ScriptedPort:
+        def __init__(self, outputs):
+            self.outputs = list(outputs)
+
+        def attempt(self, model, rendered_messages, inference, response_schema=None):
+            return RawAttempt(outcome=TransportOutcome.OK, output=self.outputs.pop(0))
+
+    envelope = RequestEnvelope(
+        state={"ticket": "t"},
+        model="qwen3:8b",
+        policy=Policy(version="p"),
+        inference=Inference(sample_count=3, temperature=0, seed=None, timeout_ms=1000),
+        questions={"department": QuestionEntry(id="department", raw=MENU_QUESTION_RAW)},
+    )
+    port = ScriptedPort(['"billing"', '"technical"', '"technical"'])
+    orchestrator = SamplingOrchestrator(
+        port=port,
+        executor=executor(),
+        versions={"prompt_template_version": "p1", "output_schema_version": "o1", "aggregation_version": "a1"},
+        backend="fake",
+    )
+    results = orchestrator.run_questions(envelope)
+    assert results["department"].answer["choice"] == "technical"
+    assert results["department"].agreement == pytest.approx(2 / 3)
+
