@@ -12,7 +12,7 @@
         "operationId": "evaluations_v1_evaluations_post",
         "responses": {
           "200": {
-            "description": "Successful Response",
+            "description": "native completed result",
             "content": {
               "application/json": {
                 "schema": {
@@ -22,6 +22,12 @@
                 }
               }
             }
+          },
+          "400": {
+            "description": "native rejected result, or REQUEST_TOO_LARGE caused by more than 64 questions"
+          },
+          "413": {
+            "description": "REQUEST_TOO_LARGE caused by the 256 KiB encoded-size limit"
           }
         }
       }
@@ -32,7 +38,7 @@
         "operationId": "replays_v1_replays_post",
         "responses": {
           "200": {
-            "description": "Successful Response",
+            "description": "native completed result",
             "content": {
               "application/json": {
                 "schema": {
@@ -42,6 +48,12 @@
                 }
               }
             }
+          },
+          "400": {
+            "description": "invalid replay body"
+          },
+          "409": {
+            "description": "REPLAY_CONFIGURATION_UNAVAILABLE"
           }
         }
       }
@@ -52,7 +64,7 @@
         "operationId": "jev_evaluations_v1_jev_evaluations_post",
         "responses": {
           "200": {
-            "description": "Successful Response",
+            "description": "Jev adapter result",
             "content": {
               "application/json": {
                 "schema": {
@@ -62,6 +74,1349 @@
                 }
               }
             }
+          },
+          "400": {
+            "description": "adapter result whose error is a native structural code (input validation) or JEV_ADAPTER_UNMAPPABLE_RESULT (unmappable result)"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "native-v1": {
+        "$defs": {
+          "jsonContent": {
+            "description": "A JSON string, object, or array (docs/CONTRACT.md 'JSON Content'). Nested values may be any JSON.",
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "object",
+                "additionalProperties": true
+              },
+              {
+                "type": "array",
+                "items": true
+              }
+            ]
+          },
+          "jsonContentOrNull": {
+            "oneOf": [
+              {
+                "$ref": "#/$defs/jsonContent"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "nonEmptyString": {
+            "type": "string",
+            "minLength": 1
+          },
+          "policy": {
+            "description": "Caller-declared, unauthenticated policy (docs/CONTRACT.md 'Policy and Prompt Boundary'). Closed object.",
+            "type": "object",
+            "properties": {
+              "version": {
+                "$ref": "#/$defs/nonEmptyString"
+              }
+            },
+            "required": [
+              "version"
+            ],
+            "additionalProperties": false
+          },
+          "inference": {
+            "description": "Closed inference settings. Omitted members use the contract defaults: sample_count 1, temperature 0, timeout_ms 30000.",
+            "type": "object",
+            "properties": {
+              "sample_count": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 5
+              },
+              "temperature": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 2
+              },
+              "seed": {
+                "type": "integer"
+              },
+              "timeout_ms": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 120000
+              }
+            },
+            "additionalProperties": false
+          },
+          "resolvedInference": {
+            "description": "The resolved (fully concrete) inference settings recorded in a trace; every member present.",
+            "type": "object",
+            "properties": {
+              "sample_count": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 5
+              },
+              "temperature": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 2
+              },
+              "seed": {
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "timeout_ms": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 120000
+              }
+            },
+            "required": [
+              "sample_count",
+              "temperature",
+              "seed",
+              "timeout_ms"
+            ],
+            "additionalProperties": false
+          },
+          "questionChoice": {
+            "type": "object",
+            "properties": {
+              "type": {
+                "const": "choice"
+              },
+              "instructions": {
+                "$ref": "#/$defs/jsonContent"
+              },
+              "criteria": {
+                "type": "object",
+                "minProperties": 2,
+                "maxProperties": 255,
+                "additionalProperties": {
+                  "$ref": "#/$defs/jsonContentOrNull"
+                }
+              }
+            },
+            "required": [
+              "type",
+              "instructions",
+              "criteria"
+            ],
+            "additionalProperties": false
+          },
+          "questionScore": {
+            "type": "object",
+            "properties": {
+              "type": {
+                "const": "score"
+              },
+              "instructions": {
+                "$ref": "#/$defs/jsonContent"
+              },
+              "criteria": {
+                "type": "array",
+                "minItems": 2,
+                "maxItems": 10,
+                "items": {
+                  "$ref": "#/$defs/jsonContent"
+                }
+              }
+            },
+            "required": [
+              "type",
+              "instructions",
+              "criteria"
+            ],
+            "additionalProperties": false
+          },
+          "questionNoul": {
+            "type": "object",
+            "properties": {
+              "type": {
+                "const": "noul"
+              },
+              "instructions": {
+                "$ref": "#/$defs/jsonContent"
+              },
+              "criteria": {
+                "type": "object",
+                "properties": {
+                  "true": {
+                    "$ref": "#/$defs/jsonContentOrNull"
+                  },
+                  "false": {
+                    "$ref": "#/$defs/jsonContentOrNull"
+                  }
+                },
+                "additionalProperties": false
+              }
+            },
+            "required": [
+              "type",
+              "instructions"
+            ],
+            "additionalProperties": false
+          },
+          "question": {
+            "oneOf": [
+              {
+                "$ref": "#/$defs/questionChoice"
+              },
+              {
+                "$ref": "#/$defs/questionScore"
+              },
+              {
+                "$ref": "#/$defs/questionNoul"
+              }
+            ]
+          },
+          "submittedQuestion": {
+            "description": "A question as submitted. Envelope validation checks only that it is an object: per docs/CONTRACT.md 'Questions' and 'Question Isolation', typed-shape violations (unknown fields, wrong criteria counts, missing members) are per-question INVALID_QUESTION errors recorded in results, not structural rejections. The valid typed shapes are questionChoice, questionScore, and questionNoul.",
+            "type": "object",
+            "additionalProperties": true
+          },
+          "requestEnvelope": {
+            "description": "Closed native v1 evaluation envelope (docs/CONTRACT.md 'Request'). Unknown top-level fields are a structural error.",
+            "type": "object",
+            "properties": {
+              "contract_version": {
+                "const": "v1"
+              },
+              "state": {
+                "$ref": "#/$defs/jsonContent"
+              },
+              "model": {
+                "$ref": "#/$defs/nonEmptyString"
+              },
+              "policy": {
+                "$ref": "#/$defs/policy"
+              },
+              "inference": {
+                "$ref": "#/$defs/inference"
+              },
+              "questions": {
+                "description": "Nonempty map from caller-selected unique IDs to typed questions; at most 64 questions. IDs are correlation keys, never rendered into prompts.",
+                "type": "object",
+                "minProperties": 1,
+                "maxProperties": 64,
+                "additionalProperties": {
+                  "$ref": "#/$defs/submittedQuestion"
+                }
+              }
+            },
+            "required": [
+              "contract_version",
+              "state",
+              "model",
+              "policy",
+              "inference",
+              "questions"
+            ],
+            "additionalProperties": false
+          },
+          "errorObject": {
+            "description": "Closed error shape. path is an RFC 6901 JSON Pointer to the offending field when one exists, and the empty string for exactly the codes enumerated in the first branch (docs/CONTRACT.md 'Validation and Execution'); the coupling is enforced below.",
+            "type": "object",
+            "properties": {
+              "code": {
+                "enum": [
+                  "MALFORMED_JSON",
+                  "UNSUPPORTED_CONTRACT_VERSION",
+                  "UNKNOWN_FIELD",
+                  "MISSING_FIELD",
+                  "INVALID_FIELD",
+                  "INVALID_QUESTIONS_MAP",
+                  "DUPLICATE_QUESTION_ID",
+                  "REQUEST_TOO_LARGE",
+                  "UNSUPPORTED_INFERENCE_SETTING",
+                  "UNSUPPORTED_LOCAL_MODEL",
+                  "INVALID_QUESTION",
+                  "INVALID_MODEL_OUTPUT",
+                  "MODEL_TIMEOUT",
+                  "MODEL_UNAVAILABLE",
+                  "CONTEXT_LIMIT_EXCEEDED",
+                  "INSUFFICIENT_EVIDENCE",
+                  "AMBIGUOUS_EVIDENCE",
+                  "UNSUPPORTED_QUESTION",
+                  "AGGREGATION_TIE",
+                  "REPLAY_CONFIGURATION_UNAVAILABLE",
+                  "JEV_ADAPTER_UNMAPPABLE_RESULT"
+                ]
+              },
+              "path": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "required": [
+              "code",
+              "path",
+              "message"
+            ],
+            "additionalProperties": false,
+            "oneOf": [
+              {
+                "properties": {
+                  "code": {
+                    "enum": [
+                      "MALFORMED_JSON",
+                      "REQUEST_TOO_LARGE",
+                      "DUPLICATE_QUESTION_ID",
+                      "INVALID_QUESTION",
+                      "INVALID_MODEL_OUTPUT",
+                      "MODEL_TIMEOUT",
+                      "MODEL_UNAVAILABLE",
+                      "CONTEXT_LIMIT_EXCEEDED",
+                      "INSUFFICIENT_EVIDENCE",
+                      "AMBIGUOUS_EVIDENCE",
+                      "UNSUPPORTED_QUESTION",
+                      "AGGREGATION_TIE",
+                      "REPLAY_CONFIGURATION_UNAVAILABLE",
+                      "JEV_ADAPTER_UNMAPPABLE_RESULT"
+                    ]
+                  },
+                  "path": {
+                    "const": ""
+                  }
+                }
+              },
+              {
+                "properties": {
+                  "code": {
+                    "enum": [
+                      "UNSUPPORTED_CONTRACT_VERSION",
+                      "UNKNOWN_FIELD",
+                      "MISSING_FIELD",
+                      "INVALID_FIELD",
+                      "INVALID_QUESTIONS_MAP",
+                      "UNSUPPORTED_INFERENCE_SETTING",
+                      "UNSUPPORTED_LOCAL_MODEL"
+                    ]
+                  },
+                  "path": {
+                    "type": "string",
+                    "pattern": "^(?:/(?:[^/~]|~[01])*)+$"
+                  }
+                }
+              }
+            ]
+          },
+          "structuralError": {
+            "description": "Error object whose code is one of the structural codes (raised before any model call).",
+            "allOf": [
+              {
+                "$ref": "#/$defs/errorObject"
+              },
+              {
+                "properties": {
+                  "code": {
+                    "enum": [
+                      "MALFORMED_JSON",
+                      "UNSUPPORTED_CONTRACT_VERSION",
+                      "UNKNOWN_FIELD",
+                      "MISSING_FIELD",
+                      "INVALID_FIELD",
+                      "INVALID_QUESTIONS_MAP",
+                      "DUPLICATE_QUESTION_ID",
+                      "REQUEST_TOO_LARGE",
+                      "UNSUPPORTED_INFERENCE_SETTING",
+                      "UNSUPPORTED_LOCAL_MODEL"
+                    ]
+                  }
+                }
+              }
+            ]
+          },
+          "questionError": {
+            "description": "Error object for a question that ended in question_error.",
+            "allOf": [
+              {
+                "$ref": "#/$defs/errorObject"
+              },
+              {
+                "properties": {
+                  "code": {
+                    "enum": [
+                      "INVALID_QUESTION",
+                      "INVALID_MODEL_OUTPUT",
+                      "MODEL_TIMEOUT",
+                      "MODEL_UNAVAILABLE",
+                      "CONTEXT_LIMIT_EXCEEDED"
+                    ]
+                  }
+                }
+              }
+            ]
+          },
+          "inabilityError": {
+            "description": "Error object for a question that ended in inability_to_answer.",
+            "allOf": [
+              {
+                "$ref": "#/$defs/errorObject"
+              },
+              {
+                "properties": {
+                  "code": {
+                    "enum": [
+                      "INSUFFICIENT_EVIDENCE",
+                      "AMBIGUOUS_EVIDENCE",
+                      "UNSUPPORTED_QUESTION",
+                      "AGGREGATION_TIE"
+                    ]
+                  }
+                }
+              }
+            ]
+          },
+          "attempt": {
+            "description": "One sampling attempt in order: raw output, parsed value if any, validation outcome, timestamp, and terminal error or inability reason (docs/CONTRACT.md 'Trace and Replay').",
+            "type": "object",
+            "properties": {
+              "raw_output": {
+                "type": "string"
+              },
+              "parsed_value": true,
+              "validation_outcome": {
+                "type": "string",
+                "minLength": 1
+              },
+              "timestamp": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "terminal_error": {
+                "description": "A sample-level terminal error or inability reason; structural codes cannot terminate an attempt.",
+                "oneOf": [
+                  {
+                    "$ref": "#/$defs/questionError"
+                  },
+                  {
+                    "$ref": "#/$defs/inabilityError"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "raw_output",
+              "parsed_value",
+              "validation_outcome",
+              "timestamp",
+              "terminal_error"
+            ],
+            "additionalProperties": false
+          },
+          "trace": {
+            "description": "Inline, self-contained replay record. Closed object (docs/CONTRACT.md 'Trace and Replay'). policy_provenance is always caller-declared-unverified; canonical_request_hash is a correlation aid, not an integrity proof.",
+            "type": "object",
+            "properties": {
+              "trace_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "parent_trace_id": {
+                "oneOf": [
+                  {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "trace_schema_version": {
+                "$ref": "#/$defs/nonEmptyString"
+              },
+              "contract_version": {
+                "const": "v1"
+              },
+              "prompt_template_version": {
+                "$ref": "#/$defs/nonEmptyString"
+              },
+              "output_schema_version": {
+                "$ref": "#/$defs/nonEmptyString"
+              },
+              "aggregation_version": {
+                "$ref": "#/$defs/nonEmptyString"
+              },
+              "policy_version": {
+                "$ref": "#/$defs/nonEmptyString"
+              },
+              "accepted_request": {
+                "$ref": "#/$defs/requestEnvelope"
+              },
+              "canonical_request_hash": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              },
+              "state": {
+                "$ref": "#/$defs/jsonContent"
+              },
+              "question": {
+                "$ref": "#/$defs/submittedQuestion"
+              },
+              "criteria": {
+                "$ref": "#/$defs/jsonContentOrNull"
+              },
+              "policy_provenance": {
+                "const": "caller-declared-unverified"
+              },
+              "rendered_messages": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "role": {
+                      "$ref": "#/$defs/nonEmptyString"
+                    },
+                    "content": {
+                      "$ref": "#/$defs/jsonContent"
+                    }
+                  },
+                  "required": [
+                    "role",
+                    "content"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "resolved_inference": {
+                "$ref": "#/$defs/resolvedInference"
+              },
+              "backend": {
+                "$ref": "#/$defs/nonEmptyString"
+              },
+              "model": {
+                "$ref": "#/$defs/nonEmptyString"
+              },
+              "model_digest": {
+                "oneOf": [
+                  {
+                    "$ref": "#/$defs/nonEmptyString"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "local_runtime_version": {
+                "$ref": "#/$defs/nonEmptyString"
+              },
+              "attempts": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/$defs/attempt"
+                }
+              },
+              "aggregate": {
+                "description": "The aggregate when one exists; otherwise null.",
+                "oneOf": [
+                  {
+                    "oneOf": [
+                      {
+                        "$ref": "#/$defs/answerChoice"
+                      },
+                      {
+                        "$ref": "#/$defs/answerScore"
+                      },
+                      {
+                        "$ref": "#/$defs/answerNoul"
+                      }
+                    ]
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "trace_id",
+              "parent_trace_id",
+              "trace_schema_version",
+              "contract_version",
+              "prompt_template_version",
+              "output_schema_version",
+              "aggregation_version",
+              "policy_version",
+              "accepted_request",
+              "canonical_request_hash",
+              "state",
+              "question",
+              "criteria",
+              "policy_provenance",
+              "rendered_messages",
+              "resolved_inference",
+              "backend",
+              "model",
+              "model_digest",
+              "local_runtime_version",
+              "attempts",
+              "aggregate"
+            ],
+            "additionalProperties": false
+          },
+          "answerChoice": {
+            "description": "vote_share carries every supplied option including zero-vote options; the key set equals the caller's menu (cross-document with the request, so not enforceable here, like the probabilities sum-to-1).",
+            "type": "object",
+            "properties": {
+              "choice": {
+                "$ref": "#/$defs/nonEmptyString"
+              },
+              "vote_share": {
+                "type": "object",
+                "minProperties": 1,
+                "additionalProperties": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1
+                }
+              }
+            },
+            "required": [
+              "choice",
+              "vote_share"
+            ],
+            "additionalProperties": false
+          },
+          "answerScore": {
+            "description": "legend and vote_share keys are the rubric positions as single decimal digits (criteria length 2-10 keeps keys in 0..9); binding them to a specific submission's length is contract prose.",
+            "type": "object",
+            "properties": {
+              "score": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 9
+              },
+              "legend": {
+                "type": "object",
+                "propertyNames": {
+                  "pattern": "^[0-9]$"
+                },
+                "additionalProperties": {
+                  "$ref": "#/$defs/jsonContent"
+                }
+              },
+              "vote_share": {
+                "type": "object",
+                "propertyNames": {
+                  "pattern": "^[0-9]$"
+                },
+                "additionalProperties": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1
+                }
+              }
+            },
+            "required": [
+              "score",
+              "legend",
+              "vote_share"
+            ],
+            "additionalProperties": false
+          },
+          "answerNoul": {
+            "type": "object",
+            "properties": {
+              "noul": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1
+              }
+            },
+            "required": [
+              "noul"
+            ],
+            "additionalProperties": false
+          },
+          "answerUnion": {
+            "oneOf": [
+              {
+                "$ref": "#/$defs/answerChoice"
+              },
+              {
+                "$ref": "#/$defs/answerScore"
+              },
+              {
+                "$ref": "#/$defs/answerNoul"
+              }
+            ]
+          },
+          "result": {
+            "description": "One entry of the keyed results map: every submitted question ID receives exactly one (docs/CONTRACT.md 'Results and Aggregation').",
+            "type": "object",
+            "properties": {
+              "type": {
+                "oneOf": [
+                  {
+                    "enum": [
+                      "choice",
+                      "score",
+                      "noul"
+                    ]
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "status": {
+                "enum": [
+                  "answered",
+                  "inability_to_answer",
+                  "question_error"
+                ]
+              },
+              "answer": {
+                "oneOf": [
+                  {
+                    "$ref": "#/$defs/answerUnion"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "agreement": {
+                "description": "Number from 0 through 1 only for answered results with sample_count > 1; otherwise null.",
+                "oneOf": [
+                  {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "requested_samples": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 5
+              },
+              "error": {
+                "oneOf": [
+                  {
+                    "$ref": "#/$defs/errorObject"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "trace": {
+                "$ref": "#/$defs/trace"
+              }
+            },
+            "required": [
+              "type",
+              "status",
+              "answer",
+              "agreement",
+              "requested_samples",
+              "error",
+              "trace"
+            ],
+            "additionalProperties": false,
+            "allOf": [
+              {
+                "if": {
+                  "properties": {
+                    "status": {
+                      "const": "answered"
+                    },
+                    "requested_samples": {
+                      "type": "integer",
+                      "minimum": 2
+                    }
+                  }
+                },
+                "then": {
+                  "properties": {
+                    "agreement": {
+                      "type": "number",
+                      "minimum": 0,
+                      "maximum": 1
+                    }
+                  }
+                }
+              },
+              {
+                "if": {
+                  "properties": {
+                    "status": {
+                      "const": "answered"
+                    },
+                    "requested_samples": {
+                      "const": 1
+                    }
+                  }
+                },
+                "then": {
+                  "properties": {
+                    "agreement": {
+                      "const": null
+                    }
+                  }
+                }
+              },
+              {
+                "if": {
+                  "properties": {
+                    "status": {
+                      "enum": [
+                        "inability_to_answer",
+                        "question_error"
+                      ]
+                    }
+                  }
+                },
+                "then": {
+                  "properties": {
+                    "agreement": {
+                      "const": null
+                    }
+                  }
+                }
+              },
+              {
+                "if": {
+                  "properties": {
+                    "status": {
+                      "const": "answered"
+                    }
+                  }
+                },
+                "then": {
+                  "properties": {
+                    "type": {
+                      "enum": [
+                        "choice",
+                        "score",
+                        "noul"
+                      ]
+                    },
+                    "answer": {
+                      "$ref": "#/$defs/answerUnion"
+                    },
+                    "error": {
+                      "const": null
+                    }
+                  }
+                }
+              },
+              {
+                "if": {
+                  "properties": {
+                    "status": {
+                      "const": "question_error"
+                    }
+                  }
+                },
+                "then": {
+                  "properties": {
+                    "answer": {
+                      "const": null
+                    },
+                    "error": {
+                      "$ref": "#/$defs/questionError"
+                    }
+                  }
+                }
+              },
+              {
+                "if": {
+                  "properties": {
+                    "status": {
+                      "const": "inability_to_answer"
+                    }
+                  }
+                },
+                "then": {
+                  "properties": {
+                    "answer": {
+                      "const": null
+                    },
+                    "error": {
+                      "$ref": "#/$defs/inabilityError"
+                    }
+                  }
+                }
+              },
+              {
+                "if": {
+                  "properties": {
+                    "status": {
+                      "const": "answered"
+                    },
+                    "type": {
+                      "const": "choice"
+                    }
+                  }
+                },
+                "then": {
+                  "properties": {
+                    "answer": {
+                      "$ref": "#/$defs/answerChoice"
+                    }
+                  }
+                }
+              },
+              {
+                "if": {
+                  "properties": {
+                    "status": {
+                      "const": "answered"
+                    },
+                    "type": {
+                      "const": "score"
+                    }
+                  }
+                },
+                "then": {
+                  "properties": {
+                    "answer": {
+                      "$ref": "#/$defs/answerScore"
+                    }
+                  }
+                }
+              },
+              {
+                "if": {
+                  "properties": {
+                    "status": {
+                      "const": "answered"
+                    },
+                    "type": {
+                      "const": "noul"
+                    }
+                  }
+                },
+                "then": {
+                  "properties": {
+                    "answer": {
+                      "$ref": "#/$defs/answerNoul"
+                    }
+                  }
+                }
+              }
+            ]
+          },
+          "completedResponse": {
+            "description": "Native response for a valid envelope; completed even when individual results contain an inability or question error.",
+            "type": "object",
+            "properties": {
+              "contract_version": {
+                "const": "v1"
+              },
+              "model": {
+                "$ref": "#/$defs/nonEmptyString"
+              },
+              "status": {
+                "const": "completed"
+              },
+              "results": {
+                "type": "object",
+                "additionalProperties": {
+                  "$ref": "#/$defs/result"
+                }
+              },
+              "error": {
+                "const": null
+              }
+            },
+            "required": [
+              "contract_version",
+              "model",
+              "status",
+              "results",
+              "error"
+            ],
+            "additionalProperties": false
+          },
+          "rejectedResponse": {
+            "description": "Native rejected response: empty results and one error object. Structural rejections happen before any model call; REPLAY_CONFIGURATION_UNAVAILABLE is the only rejection after accepting a replay request.",
+            "type": "object",
+            "properties": {
+              "contract_version": {
+                "oneOf": [
+                  {
+                    "const": "v1"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "model": {
+                "oneOf": [
+                  {
+                    "$ref": "#/$defs/nonEmptyString"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "status": {
+                "const": "rejected"
+              },
+              "results": {
+                "type": "object",
+                "maxProperties": 0
+              },
+              "error": {
+                "allOf": [
+                  {
+                    "$ref": "#/$defs/errorObject"
+                  },
+                  {
+                    "anyOf": [
+                      {
+                        "$ref": "#/$defs/structuralError"
+                      },
+                      {
+                        "properties": {
+                          "code": {
+                            "const": "REPLAY_CONFIGURATION_UNAVAILABLE"
+                          }
+                        }
+                      }
+                    ]
+                  }
+                ]
+              }
+            },
+            "required": [
+              "contract_version",
+              "model",
+              "status",
+              "results",
+              "error"
+            ],
+            "additionalProperties": false
+          },
+          "nativeResponse": {
+            "oneOf": [
+              {
+                "$ref": "#/$defs/completedResponse"
+              },
+              {
+                "$ref": "#/$defs/rejectedResponse"
+              }
+            ]
+          },
+          "replayEnvelope": {
+            "description": "Closed replay request: contract_version plus one complete inline result trace (docs/CONTRACT.md 'Trace and Replay').",
+            "type": "object",
+            "properties": {
+              "contract_version": {
+                "const": "v1"
+              },
+              "trace": {
+                "$ref": "#/$defs/trace"
+              }
+            },
+            "required": [
+              "contract_version",
+              "trace"
+            ],
+            "additionalProperties": false
+          },
+          "jevInput": {
+            "description": "Documented Jev-shaped input map accepted by the adapter face: closed object with exactly state, model, questions; no policy or inference (the adapter supplies them). Validated with the native structural rules before conversion.",
+            "type": "object",
+            "properties": {
+              "state": {
+                "$ref": "#/$defs/jsonContent"
+              },
+              "model": {
+                "$ref": "#/$defs/nonEmptyString"
+              },
+              "questions": {
+                "type": "object",
+                "minProperties": 1,
+                "maxProperties": 64,
+                "additionalProperties": {
+                  "$ref": "#/$defs/submittedQuestion"
+                }
+              }
+            },
+            "required": [
+              "state",
+              "model",
+              "questions"
+            ],
+            "additionalProperties": false
+          },
+          "jevAnswerChoice": {
+            "type": "object",
+            "properties": {
+              "type": {
+                "const": "choice"
+              },
+              "choice": {
+                "$ref": "#/$defs/nonEmptyString"
+              },
+              "probabilities": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1
+                }
+              },
+              "confidence": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1
+              }
+            },
+            "required": [
+              "type",
+              "choice",
+              "probabilities",
+              "confidence"
+            ],
+            "additionalProperties": false
+          },
+          "jevAnswerScore": {
+            "type": "object",
+            "properties": {
+              "type": {
+                "const": "score"
+              },
+              "score": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 9
+              },
+              "probabilities": {
+                "type": "object",
+                "propertyNames": {
+                  "pattern": "^[0-9]+$"
+                },
+                "additionalProperties": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1
+                }
+              },
+              "legend": {
+                "type": "object",
+                "propertyNames": {
+                  "pattern": "^[0-9]+$"
+                },
+                "additionalProperties": {
+                  "$ref": "#/$defs/jsonContent"
+                }
+              },
+              "confidence": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1
+              }
+            },
+            "required": [
+              "type",
+              "score",
+              "probabilities",
+              "legend",
+              "confidence"
+            ],
+            "additionalProperties": false
+          },
+          "jevAnswerNoul": {
+            "description": "Jev Noul answers carry no confidence field (docs.typesafe.ai/primitives/noul.md).",
+            "type": "object",
+            "properties": {
+              "type": {
+                "const": "noul"
+              },
+              "noul": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1
+              }
+            },
+            "required": [
+              "type",
+              "noul"
+            ],
+            "additionalProperties": false
+          },
+          "jevAnswer": {
+            "oneOf": [
+              {
+                "$ref": "#/$defs/jevAnswerChoice"
+              },
+              {
+                "$ref": "#/$defs/jevAnswerScore"
+              },
+              {
+                "$ref": "#/$defs/jevAnswerNoul"
+              }
+            ]
+          },
+          "jevAdapterResult": {
+            "description": "Closed adapter result (docs/CONTRACT.md 'Jev Adapter'). confidence_disclosure is mandatory and verbatim.",
+            "type": "object",
+            "properties": {
+              "answers": {
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "additionalProperties": {
+                      "$ref": "#/$defs/jevAnswer"
+                    }
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "local_judge": {
+                "description": "Documented native extension, not a Jev field.",
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "contract_version": {
+                        "const": "v1"
+                      },
+                      "traces": {
+                        "type": "object",
+                        "additionalProperties": {
+                          "$ref": "#/$defs/trace"
+                        }
+                      },
+                      "confidence_disclosure": {
+                        "const": "confidence is local repeated-sample agreement, not Jev or calibrated confidence"
+                      }
+                    },
+                    "required": [
+                      "contract_version",
+                      "traces",
+                      "confidence_disclosure"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "error": {
+                "oneOf": [
+                  {
+                    "$ref": "#/$defs/errorObject"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "answers",
+              "local_judge",
+              "error"
+            ],
+            "additionalProperties": false,
+            "allOf": [
+              {
+                "if": {
+                  "properties": {
+                    "error": {
+                      "const": null
+                    }
+                  }
+                },
+                "then": {
+                  "properties": {
+                    "answers": {
+                      "type": "object"
+                    },
+                    "local_judge": {
+                      "type": "object"
+                    }
+                  }
+                }
+              },
+              {
+                "if": {
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "const": "JEV_ADAPTER_UNMAPPABLE_RESULT"
+                        }
+                      }
+                    }
+                  }
+                },
+                "then": {
+                  "properties": {
+                    "answers": {
+                      "type": "null"
+                    }
+                  }
+                }
+              },
+              {
+                "if": {
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "enum": [
+                            "MALFORMED_JSON",
+                            "REQUEST_TOO_LARGE",
+                            "MISSING_FIELD",
+                            "UNKNOWN_FIELD",
+                            "INVALID_FIELD",
+                            "INVALID_QUESTIONS_MAP",
+                            "UNSUPPORTED_LOCAL_MODEL"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "code"
+                      ]
+                    }
+                  }
+                },
+                "then": {
+                  "properties": {
+                    "answers": {
+                      "type": "null"
+                    },
+                    "local_judge": {
+                      "type": "null"
+                    }
+                  }
+                }
+              }
+            ]
           }
         }
       }

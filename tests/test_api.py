@@ -94,19 +94,40 @@ def test_openapi_document_declares_the_three_routes():
         assert list(paths[path].keys()) == ["post"]
 
 
-def test_committed_api_openapi_matches_the_app():
-    """The generated OpenAPI document stays aligned with the app contract."""
-    client = make_client(native=lambda raw: (200, COMPLETED))
+def test_committed_api_openapi_matches_the_app_exactly():
+    """The committed document is byte-meaning-identical to the generated one."""
+    from local_judge.api import create_app as ca
+
+    stage1_defs = json.load(open("docs/schemas/native-v1.schema.json", encoding="utf-8"))["$defs"]
+    app = ca(native_evaluator=lambda raw: (200, COMPLETED), stage1_defs=stage1_defs)
+    client = TestClient(app)
     generated = client.get("/openapi.json").json()
     committed = json.load(open("docs/API_OpenAPI.json", encoding="utf-8"))
-    assert generated["paths"].keys() == committed["paths"].keys()
-    for path, methods in committed["paths"].items():
-        for method, operation in methods.items():
-            assert generated["paths"][path][method]["summary"] == operation["summary"]
-            assert (
-                generated["paths"][path][method]["responses"].keys()
-                == operation["responses"].keys()
-            )
+    assert generated == committed
+    for path in ("/v1/evaluations", "/v1/replays", "/v1/jev/evaluations"):
+        assert generated["paths"][path]["post"]["responses"]
+    assert "native-v1" in generated["components"]["schemas"]
+    assert generated["components"]["schemas"]["native-v1"]["$defs"]["requestEnvelope"]
+
+
+def test_serve_defaults_bind_loopback(monkeypatch):
+    import sys
+    import types
+
+    import local_judge.api as api_module
+
+    captured = {}
+
+    def fake_run(app, host, port):
+        captured["host"] = host
+        captured["port"] = port
+
+    fake_uv = types.ModuleType("uvicorn")
+    fake_uv.run = fake_run
+    monkeypatch.setitem(sys.modules, "uvicorn", fake_uv)
+    app = api_module.create_app(native_evaluator=lambda raw: (200, {}))
+    api_module.serve(app)
+    assert captured == {"host": api_module.DEFAULT_HOST, "port": api_module.DEFAULT_PORT}
 
 
 def test_app_does_not_bind_or_serve_at_import_or_creation():
@@ -117,3 +138,38 @@ def test_app_does_not_bind_or_serve_at_import_or_creation():
     assert app is not None
     assert DEFAULT_HOST in ("127.0.0.1", "localhost")
     assert isinstance(DEFAULT_PORT, int)
+
+
+def test_request_too_large_size_cause_preserves_413():
+    rejected = {"contract_version": "v1", "model": None, "status": "rejected",
+                "results": {}, "error": {"code": "REQUEST_TOO_LARGE", "path": "", "message": "256 KiB"}}
+
+    def native(raw):
+        return 413, rejected
+
+    client = make_client(native=native)
+    response = client.post("/v1/evaluations", content=b"x")
+    assert response.status_code == 413
+    assert response.json() == rejected
+
+
+def test_real_core_integration_native_rejection_end_to_end():
+    """Real validator + rejected-body construction through the route, no model."""
+    from local_judge import RequestValidator, StructuralCode, StructuralError, RejectionResponse
+
+    def native(raw: bytes):
+        try:
+            RequestValidator({}).parse(raw)
+        except StructuralError as exc:
+            rejected = RejectionResponse(contract_version="v1", model=None, error=exc.error)
+            status = 413 if exc.error.code == "REQUEST_TOO_LARGE" and "256 KiB" in exc.error.message else 400
+            return status, rejected.to_dict()
+        raise AssertionError("expected rejection")
+
+    client = make_client(native=native)
+    bad = client.post("/v1/evaluations", content=b"{oops")
+    assert bad.status_code == 400
+    assert bad.json()["error"]["code"] == "MALFORMED_JSON"
+    oversize = client.post("/v1/evaluations", content=b'{"state": "' + b"x" * (256 * 1024) + b'"}')
+    assert oversize.status_code == 413
+    assert oversize.json()["error"]["code"] == "REQUEST_TOO_LARGE"
