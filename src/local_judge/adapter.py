@@ -37,22 +37,25 @@ class JevAdapter:
         """
         for key in jev_input:
             if key not in self._INPUT_KEYS:
-                escape = key.replace("~", "~0").replace("/", "~1")
+                label = key if isinstance(key, str) else str(key)
+                escape = label.replace("~", "~0").replace("/", "~1")
                 raise StructuralError(
-                    StructuralCode.UNKNOWN_FIELD, f"unknown Jev input field: {key!r}", f"/{escape}"
+                    StructuralCode.UNKNOWN_FIELD, f"unknown Jev input field: {label!r}", f"/{escape}"
                 )
+        # absent members stay absent so the validator reports MISSING_FIELD
+        # (not INVALID_FIELD for an injected None); present members are type-checked
         native = {
             "contract_version": "v1",
-            "state": jev_input.get("state"),
-            "model": jev_input.get("model"),
             "policy": {"version": self.POLICY_VERSION},
             "inference": {
                 "sample_count": self.SAMPLE_COUNT,
                 "temperature": self.TEMPERATURE,
                 "timeout_ms": self.TIMEOUT_MS,
             },
-            "questions": jev_input.get("questions"),
         }
+        for key in ("state", "model", "questions"):
+            if key in jev_input:
+                native[key] = jev_input[key]
         return self._validator.parse(native)
 
     def evaluate(self, jev_input: Mapping[str, Any], runner) -> dict:
@@ -62,7 +65,7 @@ class JevAdapter:
         except StructuralError as exc:
             return self._structural_failure(exc)
         results = runner(envelope)
-        return self.map_results(results)
+        return self.map_results(jev_input, results)
 
     def evaluate_with_results(self, jev_input: Mapping[str, Any], results: Mapping[str, ResultEntry]) -> dict:
         """Map caller-supplied native results (fake-runner test seam)."""
@@ -70,18 +73,30 @@ class JevAdapter:
             self.convert_input(jev_input)
         except StructuralError as exc:
             return self._structural_failure(exc)
-        return self.map_results(results)
+        return self.map_results(jev_input, results)
 
-    def map_results(self, results: Mapping[str, ResultEntry]) -> dict:
+    def map_results(self, jev_input: Mapping[str, Any], results: Mapping[str, ResultEntry]) -> dict:
+        requested = set(jev_input.get("questions", {}))
         traces = {}
         answers = {}
         mappable = True
-        for question_id, entry in results.items():
+        for question_id in requested:
+            entry = results.get(question_id)
+            if entry is None:
+                mappable = False
+                continue
             traces[question_id] = entry.trace.to_dict()
             if entry.status is not ResultStatus.ANSWERED or entry.answer is None:
                 mappable = False
                 continue
+            if entry.agreement is None:
+                # missing agreement (e.g. a single-sample result) cannot be disclosed
+                mappable = False
+                continue
             answers[question_id] = self._convert_answer(entry)
+        if not mappable or set(results) != requested:
+            # unrequested entries or dropped questions refuse the whole result
+            mappable = mappable and set(results) == requested
         if not mappable:
             return {
                 "answers": None,

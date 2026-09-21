@@ -126,7 +126,8 @@ def test_unmappable_result_never_invents_answers():
         trace=TraceRecord.from_dict({**minimal_trace().to_dict(), "trace_id": "00000000-0000-4000-8000-0000000000B1"}),
     )
     results = {"q": fallback}
-    result = adapter().evaluate_with_results(jev_request(), results)
+    request = {"state": "s", "model": "qwen3:8b", "questions": {"q": {"type": "noul", "instructions": "i"}}}
+    result = adapter().evaluate_with_results(request, results)
     assert result["answers"] is None
     assert result["error"]["code"] == "JEV_ADAPTER_UNMAPPABLE_RESULT"
     assert result["local_judge"]["traces"]["q"] is not None
@@ -139,8 +140,13 @@ def test_score_mapping_carries_legend_probabilities_and_disclosed_confidence():
         "legend": {"0": "Cosmetic", "1": "Workaround", "2": "Blocking"},
         "vote_share": {"0": 0, "1": 0.5, "2": 0.5},
     }
+    request = {
+        "state": {"ticket": "Checkout degraded."},
+        "model": "qwen3:8b",
+        "questions": {"severity": {"type": "score", "instructions": "Severity?", "criteria": ["Cosmetic", "Workaround", "Blocking"]}},
+    }
     results = {"severity": native_answered("severity", "0000000000C1", score_answer, agreement=0.5)}
-    result = adapter().evaluate_with_results(jev_request(), results)
+    result = adapter().evaluate_with_results(request, results)
     assert result["answers"]["severity"] == {
         "type": "score",
         "score": 1.5,
@@ -149,3 +155,56 @@ def test_score_mapping_carries_legend_probabilities_and_disclosed_confidence():
         "confidence": 0.5,
     }
     validate_against(result, "#/$defs/jevAdapterResult")
+
+
+def test_missing_requested_question_refuses():
+    results = {"department": native_answered("department", "0000000000D1", {"choice": "billing", "vote_share": {"billing": 1}})}
+    request = {
+        "state": "s",
+        "model": "qwen3:8b",
+        "questions": {
+            "department": {"type": "choice", "instructions": "i", "criteria": {"billing": "b"}},
+            "missing": {"type": "noul", "instructions": "i"},
+        },
+    }
+    result = adapter().evaluate_with_results(request, results)
+    assert result["answers"] is None
+    assert result["error"]["code"] == "JEV_ADAPTER_UNMAPPABLE_RESULT"
+
+
+def test_unrequested_result_refuses():
+    results = {
+        "department": native_answered("department", "0000000000D2", {"choice": "billing", "vote_share": {"billing": 1}}),
+        "ghost": native_answered("ghost", "0000000000D3", {"noul": 0.5}),
+    }
+    result = adapter().evaluate_with_results(jev_request(), results)
+    assert result["answers"] is None
+    assert result["error"]["code"] == "JEV_ADAPTER_UNMAPPABLE_RESULT"
+
+
+def test_answered_single_sample_without_agreement_refuses():
+    results = {"department": native_answered("department", "0000000000D4", {"choice": "billing", "vote_share": {"billing": 1}}, requested_samples=1, agreement=None)}
+    result = adapter().evaluate_with_results(jev_request(), results)
+    assert result["answers"] is None
+    assert result["error"]["code"] == "JEV_ADAPTER_UNMAPPABLE_RESULT"
+
+
+def test_missing_jev_fields_report_missing_field():
+    result = adapter().evaluate({}, None)
+    assert result["answers"] is None and result["local_judge"] is None
+    assert result["error"]["code"] == "MISSING_FIELD"
+    assert result["error"]["path"] == "/state"
+
+
+def test_non_string_jev_key_refuses_without_crashing():
+    result = adapter().evaluate({1: "x", "state": "s", "model": "qwen3:8b",
+                                 "questions": {"q": {"type": "noul", "instructions": "i"}}}, None)
+    assert result["error"]["code"] == "UNKNOWN_FIELD"
+
+
+def test_stage_seven_adapter_fixtures_validate_against_the_schema():
+    success = load_fixture("jev-adapter-success.result.json")
+    validate_against(success, "#/$defs/jevAdapterResult")
+    unmappable = load_fixture("jev-adapter-unmappable.result.json")
+    validate_against(unmappable, "#/$defs/jevAdapterResult")
+    validate_against(load_fixture("jev-adapter-success.request.json"), "#/$defs/jevInput")
