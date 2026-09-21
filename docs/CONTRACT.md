@@ -421,9 +421,10 @@ input that fails structural validation produces the adapter result shape with
 code with a JSON Pointer path into the raw Jev body;
 `JEV_ADAPTER_UNMAPPABLE_RESULT` is never used for input validation. Because
 the input has no `contract_version`, `policy`, or `inference`, the codes that
-concern those fields cannot fire on this face; the reachable structural codes
-here are `MALFORMED_JSON`, `MISSING_FIELD`, `UNKNOWN_FIELD`, `INVALID_FIELD`,
-and `INVALID_QUESTIONS_MAP`.
+concern `contract_version`, `policy`, and most inference settings cannot fire
+on this face; the reachable structural codes here are `MALFORMED_JSON`,
+`MISSING_FIELD`, `UNKNOWN_FIELD`, `INVALID_FIELD`, `INVALID_QUESTIONS_MAP`,
+`UNSUPPORTED_LOCAL_MODEL`, and `REQUEST_TOO_LARGE`.
 
 Its result is a closed adapter object with three fields:
 

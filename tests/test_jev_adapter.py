@@ -208,3 +208,18 @@ def test_stage_seven_adapter_fixtures_validate_against_the_schema():
     unmappable = load_fixture("jev-adapter-unmappable.result.json")
     validate_against(unmappable, "#/$defs/jevAdapterResult")
     validate_against(load_fixture("jev-adapter-success.request.json"), "#/$defs/jevInput")
+
+
+def test_wrong_typed_result_for_a_question_refuses():
+    results = {
+        "is_refund": native_answered("is_refund", "0000000000E1", {"choice": "yes", "vote_share": {"yes": 1}}),
+    }
+    request = {
+        "state": "s",
+        "model": "qwen3:8b",
+        "questions": {"is_refund": {"type": "noul", "instructions": "i"}},
+    }
+    result = adapter().evaluate_with_results(request, results)
+    assert result["answers"] is None
+    assert result["error"]["code"] == "JEV_ADAPTER_UNMAPPABLE_RESULT"
+    validate_against(result, "#/$defs/jevAdapterResult")

@@ -80,24 +80,28 @@ class JevAdapter:
         traces = {}
         answers = {}
         mappable = True
+        refused = False
         for question_id in requested:
             entry = results.get(question_id)
             if entry is None:
-                mappable = False
+                refused = True  # a requested question was not answered
                 continue
             traces[question_id] = entry.trace.to_dict()
+            requested_type = jev_input.get("questions", {}).get(question_id, {}).get("type")
+            if entry.type_ != requested_type:
+                refused = True  # a result of the wrong type is never mapped
+                continue
             if entry.status is not ResultStatus.ANSWERED or entry.answer is None:
-                mappable = False
+                refused = True
                 continue
             if entry.agreement is None:
                 # missing agreement (e.g. a single-sample result) cannot be disclosed
-                mappable = False
+                refused = True
                 continue
             answers[question_id] = self._convert_answer(entry)
-        if not mappable or set(results) != requested:
-            # unrequested entries or dropped questions refuse the whole result
-            mappable = mappable and set(results) == requested
-        if not mappable:
+        if refused or set(results) != requested:
+            refused = True  # unrequested entries or dropped questions refuse the whole result
+        if refused:
             return {
                 "answers": None,
                 "local_judge": self._local_judge(traces),
