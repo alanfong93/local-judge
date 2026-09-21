@@ -6,6 +6,7 @@ need for a running Ollama instance.
 """
 
 import json
+import time
 
 import pytest
 
@@ -357,8 +358,7 @@ def test_http_error_body_read_is_bounded_by_the_deadline():
     original_open = slow_error.open
 
     def open_with_socket_chain(request, timeout=None):
-        started = time.monotonic()
-        time.sleep(0.05)
+        time.sleep(0.02)
         try:
             original_open(request, timeout)
         except urllib.error.HTTPError as exc:
