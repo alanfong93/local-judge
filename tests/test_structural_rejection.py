@@ -210,8 +210,3 @@ def test_rejection_response_container_matches_published_schema():
 def test_non_object_request_body_is_malformed():
     expect_rejection("[1, 2, 3]", StructuralCode.MALFORMED_JSON, "")
 
-
-def json_dumps(obj):
-    import json
-
-    return json.dumps(obj, ensure_ascii=False)

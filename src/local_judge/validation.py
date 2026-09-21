@@ -6,13 +6,14 @@ question content are preserved as opaque data; this layer never interprets
 their content as engine configuration or authority.
 
 Each check order is pinned by tests/test_structural_rejection.py:
-malformed JSON, oversize payload, contract version, unknown/missing/invalid
-envelope fields (state, model, policy, inference), unknown model profile,
-unsupported inference settings, questions map shape, duplicate raw question
-IDs, question count.
+malformed JSON, oversize payload, duplicate top-level fields, contract
+version, unknown/missing/invalid envelope fields (state, model, policy,
+inference), unknown model profile, unsupported inference settings, questions
+map shape, duplicate raw question IDs, question count.
 """
 
 import json
+import math
 from dataclasses import dataclass
 from typing import Any, Mapping, Union
 
@@ -36,6 +37,13 @@ class _DupDict(dict):
 
 def _reject_constant(name: str) -> None:
     raise ValueError(f"{name} is not JSON")
+
+
+def _strict_float(text: str) -> float:
+    value = float(text)
+    if not math.isfinite(value):
+        raise ValueError(f"{text} is not a finite JSON number")
+    return value
 
 
 def _escape(token: str) -> str:
@@ -74,11 +82,21 @@ class RequestValidator:
 
     def parse(self, raw: Union[bytes, bytearray, str, Mapping[str, Any]]) -> RequestEnvelope:
         if isinstance(raw, Mapping):
-            raw = json.dumps(raw, ensure_ascii=False).encode("utf-8")
+            try:
+                raw = json.dumps(raw, ensure_ascii=False, allow_nan=False).encode("utf-8")
+            except (TypeError, ValueError, OverflowError):
+                raise StructuralError(
+                    StructuralCode.MALFORMED_JSON, "the request mapping is not JSON-representable"
+                ) from None
         elif isinstance(raw, str):
             raw = raw.encode("utf-8")
         try:
-            doc = json.loads(raw, object_pairs_hook=_pairs_hook, parse_constant=_reject_constant)
+            doc = json.loads(
+                raw,
+                object_pairs_hook=_pairs_hook,
+                parse_constant=_reject_constant,
+                parse_float=_strict_float,
+            )
         except (UnicodeDecodeError, ValueError):
             raise StructuralError(
                 StructuralCode.MALFORMED_JSON, "the raw request cannot be decoded as one JSON value"
@@ -130,7 +148,12 @@ class RequestValidator:
         if not isinstance(policy_doc, _DupDict):
             raise StructuralError(StructuralCode.INVALID_FIELD, "policy must be an object", "/policy")
         if policy_doc.dups:
-            raise StructuralError(StructuralCode.INVALID_FIELD, "duplicate field in policy", "/policy")
+            first_dup = sorted(policy_doc.dups)[0]
+            raise StructuralError(
+                StructuralCode.INVALID_FIELD,
+                f"duplicate policy field: {first_dup!r}",
+                f"/policy/{_escape(first_dup)}",
+            )
         self._require(policy_doc, "version", "/policy")
         version = policy_doc["version"]
         if not isinstance(version, str) or not version:
@@ -149,7 +172,12 @@ class RequestValidator:
         if not isinstance(inference_doc, _DupDict):
             raise StructuralError(StructuralCode.INVALID_FIELD, "inference must be an object", "/inference")
         if inference_doc.dups:
-            raise StructuralError(StructuralCode.INVALID_FIELD, "duplicate field in inference", "/inference")
+            first_dup = sorted(inference_doc.dups)[0]
+            raise StructuralError(
+                StructuralCode.INVALID_FIELD,
+                f"duplicate inference field: {first_dup!r}",
+                f"/inference/{_escape(first_dup)}",
+            )
         for key in inference_doc:
             if key not in _INFERENCE_KEYS:
                 raise StructuralError(

@@ -65,3 +65,31 @@ def test_error_object_enforces_path_rule():
             timestamp="2026-09-22T12:00:00Z",
             terminal_error=ErrorObject(code="MALFORMED_JSON", path="", message="m"),
         )
+
+
+def test_container_invariants_reject_contract_violations():
+    import pytest
+
+    valid = load_fixture("choice-valid.response.json")["results"]["department"]
+    entry = ResultEntry.from_dict(valid)
+    with pytest.raises(ValueError):
+        ResultEntry.from_dict({**valid, "answer": None})  # answered without answer
+    with pytest.raises(ValueError):
+        ResultEntry.from_dict({**valid, "agreement": 0.5})  # n=1 must have null agreement
+    with pytest.raises(ValueError):
+        ResultEntry.from_dict({**valid, "error": {"code": "MODEL_TIMEOUT", "path": "", "message": "m"}})
+    bad_trace = load_fixture("malformed-question-sibling.response.json")["results"]["urgency"]["trace"]
+    with pytest.raises(ValueError):
+        TraceRecord.from_dict({**bad_trace, "accepted_request": {}})
+    with pytest.raises(ValueError):
+        TraceRecord.from_dict({**bad_trace, "resolved_inference": {"sample_count": 9}})
+    with pytest.raises(ValueError):
+        TraceRecord.from_dict({**bad_trace, "trace_schema_version": ""})
+
+
+def test_non_answered_results_reject_wrong_error_class():
+    import pytest
+
+    fixture = load_fixture("choice-tie.response.json")["results"]["priority"]
+    with pytest.raises(ValueError):
+        ResultEntry.from_dict({**fixture, "error": {"code": "INVALID_QUESTION", "path": "", "message": "m"}})

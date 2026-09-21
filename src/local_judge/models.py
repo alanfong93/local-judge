@@ -27,6 +27,31 @@ from local_judge.errors import (
 
 _SAMPLE_TERMINAL_CODES = QUESTION_ERROR_CODES | INABILITY_CODES
 
+
+def _is_int(value):
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def _is_number(value):
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def _require_resolved_inference(d):
+    sample_count = d.get("sample_count")
+    if not _is_int(sample_count) or not 1 <= sample_count <= 5:
+        raise ValueError("resolved_inference.sample_count must be an integer from 1 through 5")
+    temperature = d.get("temperature")
+    if not _is_number(temperature) or not 0 <= temperature <= 2:
+        raise ValueError("resolved_inference.temperature must be a number from 0 through 2")
+    seed = d.get("seed")
+    if seed is not None and not _is_int(seed):
+        raise ValueError("resolved_inference.seed must be an integer or null")
+    timeout_ms = d.get("timeout_ms")
+    if not _is_int(timeout_ms) or not 1 <= timeout_ms <= 120000:
+        raise ValueError("resolved_inference.timeout_ms must be an integer from 1 through 120000")
+    if set(d) != {"sample_count", "temperature", "seed", "timeout_ms"}:
+        raise ValueError("resolved_inference must be the closed resolved settings object")
+
 _RESULT_KEYS = frozenset(
     {"type", "status", "answer", "agreement", "requested_samples", "error", "trace"}
 )
@@ -114,6 +139,10 @@ class AttemptRecord:
     terminal_error: ErrorObject | None
 
     def __post_init__(self) -> None:
+        if not isinstance(self.raw_output, str):
+            raise ValueError("attempt raw_output must be a string")
+        if not isinstance(self.validation_outcome, str) or not self.validation_outcome:
+            raise ValueError("attempt validation_outcome must be a nonempty string")
         if self.terminal_error is not None and self.terminal_error.code not in _SAMPLE_TERMINAL_CODES:
             raise ValueError(
                 f"an attempt can only end in a sample-level error or inability reason, got {self.terminal_error.code!r}"
@@ -123,6 +152,8 @@ class AttemptRecord:
 
     @classmethod
     def from_dict(cls, d: Mapping[str, Any]) -> "AttemptRecord":
+        if not isinstance(d, Mapping):
+            raise ValueError("an attempt record must be a JSON object")
         if set(d) != _ATTEMPT_KEYS:
             raise ValueError(f"attempt members must be exactly {_ATTEMPT_KEYS}, got {sorted(d)}")
         terminal = d["terminal_error"]
@@ -172,6 +203,39 @@ class TraceRecord:
     aggregate: Any = None
 
     def __post_init__(self) -> None:
+        for name in (
+            "trace_schema_version",
+            "prompt_template_version",
+            "output_schema_version",
+            "aggregation_version",
+            "policy_version",
+            "backend",
+            "model",
+            "local_runtime_version",
+        ):
+            value = getattr(self, name)
+            if not isinstance(value, str) or not value:
+                raise ValueError(f"trace member {name} must be a nonempty string")
+        if not isinstance(self.state, (str, list, dict)):
+            raise ValueError("trace state must be a JSON string, object, or array")
+        if not isinstance(self.accepted_request, Mapping) or set(self.accepted_request) != {
+            "contract_version",
+            "state",
+            "model",
+            "policy",
+            "inference",
+            "questions",
+        }:
+            raise ValueError("trace accepted_request must be the closed accepted request object")
+        if not isinstance(self.question, Mapping):
+            raise ValueError("trace question must be the submitted question object")
+        if self.criteria is not None and not isinstance(self.criteria, (str, list, dict)):
+            raise ValueError("trace criteria must be JSONContent or null")
+        if not isinstance(self.rendered_messages, list):
+            raise ValueError("trace rendered_messages must be a list")
+        if not isinstance(self.resolved_inference, Mapping):
+            raise ValueError("trace resolved_inference must be the resolved settings object")
+        _require_resolved_inference(self.resolved_inference)
         if not _UUID_PATTERN.match(self.trace_id):
             raise ValueError(f"trace_id must be a UUID, got {self.trace_id!r}")
         if self.parent_trace_id is not None and not _UUID_PATTERN.match(self.parent_trace_id):
@@ -185,6 +249,8 @@ class TraceRecord:
 
     @classmethod
     def from_dict(cls, d: Mapping[str, Any]) -> "TraceRecord":
+        if not isinstance(d, Mapping):
+            raise ValueError("a trace record must be a JSON object")
         if set(d) != _TRACE_KEYS:
             raise ValueError(f"trace members must be exactly {_TRACE_KEYS}, got {sorted(d)}")
         return cls(
@@ -254,9 +320,43 @@ class ResultEntry:
     def __post_init__(self) -> None:
         if not isinstance(self.trace, TraceRecord):
             raise ValueError("every result carries an inline trace record")
+        if not _is_int(self.requested_samples) or not 1 <= self.requested_samples <= 5:
+            raise ValueError("requested_samples must be an integer from 1 through 5")
+        if not isinstance(self.status, ResultStatus):
+            raise ValueError("status must be a ResultStatus")
+        if self.type_ is not None and self.type_ not in ("choice", "score", "noul"):
+            raise ValueError(f"unknown question type: {self.type_!r}")
+        answered = self.status is ResultStatus.ANSWERED
+        if answered:
+            if self.answer is None:
+                raise ValueError("answered results carry a type-specific answer")
+            if self.error is not None:
+                raise ValueError("answered results carry no error")
+            if self.type_ is None:
+                raise ValueError("answered results know their type")
+            if self.requested_samples == 1:
+                if self.agreement is not None:
+                    raise ValueError("agreement is null when one sample was requested")
+            else:
+                if not _is_number(self.agreement) or not 0 <= self.agreement <= 1:
+                    raise ValueError("agreement must be a number from 0 through 1 for answered multi-sample results")
+        else:
+            if self.answer is not None:
+                raise ValueError("non-answered results never carry an answer")
+            if self.error is None:
+                raise ValueError("non-answered results carry the terminal error")
+            if self.agreement is not None:
+                raise ValueError("agreement is null for non-answered results")
+            expected = (
+                QUESTION_ERROR_CODES if self.status is ResultStatus.QUESTION_ERROR else INABILITY_CODES
+            )
+            if self.error.code not in expected:
+                raise ValueError(f"{self.status.value} cannot carry error code {self.error.code!r}")
 
     @classmethod
     def from_dict(cls, d: Mapping[str, Any]) -> "ResultEntry":
+        if not isinstance(d, Mapping):
+            raise ValueError("a result entry must be a JSON object")
         if set(d) != _RESULT_KEYS:
             raise ValueError(f"result members must be exactly {_RESULT_KEYS}, got {sorted(d)}")
         return cls(

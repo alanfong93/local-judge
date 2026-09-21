@@ -1,0 +1,7 @@
+Metadata-Version: 2.4
+Name: local-judge
+Version: 0.1.0
+Summary: Local-judge native v1 core: envelope boundary, model port, and type-executor interfaces.
+Requires-Python: >=3.11
+Provides-Extra: dev
+Requires-Dist: pytest>=8; extra == "dev"
