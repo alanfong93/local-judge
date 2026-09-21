@@ -310,3 +310,34 @@ def test_http_exception_maps_to_unavailable():
     }
     attempt = OllamaModelPort(profiles, transport).attempt("qwen3:8b", MESSAGES, Inference())
     assert attempt.outcome is TransportOutcome.UNAVAILABLE
+
+
+def test_http_error_body_read_is_bounded_by_the_deadline():
+    """A 4xx arriving near the deadline cannot hold another full socket timeout."""
+    import time
+    import urllib.error
+
+    from local_judge.ollama import UrllibOllamaTransport
+
+    class SlowErrorOpener:
+        def open(self, request, timeout=None):
+            started = time.monotonic()
+            time.sleep(0.05)  # most of the 80ms budget is gone when the 4xx lands
+            raise urllib.error.HTTPError(
+                request.full_url, 404, "nope", {}, SlowBody(started, timeout)
+            )
+
+    class SlowBody:
+        def __init__(self, started, timeout):
+            self.started = started
+            self.timeout = timeout
+
+        def read(self, n=-1):
+            time.sleep(0.05)  # drip: must be cut by the remaining-budget timeout
+            return b"err"
+
+    transport = UrllibOllamaTransport(opener=SlowErrorOpener())
+    started = time.monotonic()
+    with pytest.raises(OllamaTransportTimeout):
+        transport.post("http://127.0.0.1:11434/api/chat", {}, 80)
+    assert time.monotonic() - started < 0.3
