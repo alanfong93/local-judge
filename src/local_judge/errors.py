@@ -6,8 +6,22 @@ the offending field for every other code.
 """
 
 from dataclasses import dataclass
+from datetime import datetime
 from enum import StrEnum
 import re
+
+RFC3339_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})$")
+
+
+def is_rfc3339(value: str) -> bool:
+    """RFC 3339 shape AND a calendar-valid instant (2026-99-99 is not a date)."""
+    if not isinstance(value, str) or not RFC3339_PATTERN.match(value):
+        return False
+    try:
+        datetime.fromisoformat(value.replace("Z", "+00:00"))
+        return True
+    except ValueError:
+        return False
 
 _POINTER_PATTERN = re.compile(r"^(?:/(?:[^/~]|~[01])*)+$")
 
@@ -77,6 +91,8 @@ class ErrorObject:
     def __post_init__(self) -> None:
         if self.code not in EMPTY_PATH_CODES and self.code not in FIELD_PATH_CODES:
             raise ValueError(f"unknown error code: {self.code!r}")
+        if not isinstance(self.message, str) or not self.message:
+            raise ValueError("message must be a nonempty string")
         if self.code in EMPTY_PATH_CODES:
             if self.path != "":
                 raise ValueError(f"{self.code} carries an empty path, got {self.path!r}")

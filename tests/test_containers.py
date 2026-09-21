@@ -111,3 +111,23 @@ def test_answer_shape_must_match_type():
     bad_messages = load_fixture("choice-valid.response.json")["results"]["department"]["trace"]
     with pytest.raises(ValueError):
         TraceRecord.from_dict({**bad_messages, "rendered_messages": [{"role": "", "content": "x"}]})
+
+
+def test_conformance_invariants_from_final_gate():
+    import pytest
+
+    trace = load_fixture("choice-valid.response.json")["results"]["department"]["trace"]
+    with pytest.raises(ValueError):
+        TraceRecord.from_dict({**trace, "model_digest": 1})
+    with pytest.raises(ValueError):
+        TraceRecord.from_dict({**trace, "accepted_request": {**trace["accepted_request"], "state": 17}})
+    with pytest.raises(ValueError):
+        AttemptRecord.from_dict(
+            {**trace["attempts"][0], "timestamp": "2026-99-99T99:99:99Z"}
+        )
+    from local_judge import ErrorObject
+
+    with pytest.raises(ValueError):
+        ErrorObject(code="MODEL_TIMEOUT", path="", message="")
+    with pytest.raises(ValueError):
+        ErrorObject(code="MODEL_TIMEOUT", path="", message=5)

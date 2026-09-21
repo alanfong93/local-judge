@@ -23,6 +23,7 @@ from local_judge.errors import (
     ErrorObject,
     INABILITY_CODES,
     QUESTION_ERROR_CODES,
+    is_rfc3339,
 )
 
 _SAMPLE_TERMINAL_CODES = QUESTION_ERROR_CODES | INABILITY_CODES
@@ -228,8 +229,8 @@ class AttemptRecord:
             raise ValueError(
                 f"an attempt can only end in a sample-level error or inability reason, got {self.terminal_error.code!r}"
             )
-        if not _TIMESTAMP_PATTERN.match(self.timestamp):
-            raise ValueError(f"attempt timestamp must be RFC 3339, got {self.timestamp!r}")
+        if not is_rfc3339(self.timestamp):
+            raise ValueError(f"attempt timestamp must be a valid RFC 3339 instant, got {self.timestamp!r}")
 
     @classmethod
     def from_dict(cls, d: Mapping[str, Any]) -> "AttemptRecord":
@@ -330,6 +331,12 @@ class TraceRecord:
             raise ValueError("policy_provenance is fixed to caller-declared-unverified")
         if self.contract_version != "v1":
             raise ValueError("trace contract_version must be exactly 'v1'")
+        if self.model_digest is not None and (not isinstance(self.model_digest, str) or not self.model_digest):
+            raise ValueError("model_digest must be a nonempty string or null")
+        if self.accepted_request["contract_version"] != "v1":
+            raise ValueError("trace accepted_request.contract_version must be exactly 'v1'")
+        if not isinstance(self.accepted_request["state"], (str, list, dict)):
+            raise ValueError("trace accepted_request.state must be a JSON string, object, or array")
 
     @classmethod
     def from_dict(cls, d: Mapping[str, Any]) -> "TraceRecord":
