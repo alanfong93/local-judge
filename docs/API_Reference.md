@@ -7,9 +7,9 @@ tenant, storage, or hosted-inference behavior.
 
 | Method | Path | Request | Success | Rejection |
 | --- | --- | --- | --- | --- |
-| `POST` | `/v1/evaluations` | Native v1 evaluation envelope | `200` native completed result | `400` native rejected result; `413` for `REQUEST_TOO_LARGE` |
+| `POST` | `/v1/evaluations` | Native v1 evaluation envelope | `200` native completed result | `400` native rejected result; `413` when `REQUEST_TOO_LARGE` is caused by the 256 KiB limit, `400` when caused by more than 64 questions |
 | `POST` | `/v1/replays` | `{ "contract_version": "v1", "trace": <inline result trace> }` | `200` native completed result | `400` invalid replay body; `409` native rejected result with `REPLAY_CONFIGURATION_UNAVAILABLE` |
-| `POST` | `/v1/jev/evaluations` | Documented Jev-shaped input map | `200` Jev adapter result | `400` native rejected structural result or adapter result with `JEV_ADAPTER_UNMAPPABLE_RESULT` |
+| `POST` | `/v1/jev/evaluations` | Documented Jev-shaped input map | `200` Jev adapter result | `400` adapter result whose `error` is a native structural code (input validation) or `JEV_ADAPTER_UNMAPPABLE_RESULT` (unmappable result) |
 
 Request and response fields are normative in `docs/CONTRACT.md`; the generated
 OpenAPI document must reference the Stage 1 JSON Schema definitions.
