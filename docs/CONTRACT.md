@@ -214,8 +214,16 @@ Every error object has this closed shape:
 ```
 
 `path` is an RFC 6901 JSON Pointer to the offending field when one exists, and
-the empty string when no single field applies (`MALFORMED_JSON`,
-`REQUEST_TOO_LARGE`, and the runtime, replay, and adapter codes). `message` is
+the empty string otherwise. The empty-string codes are exactly
+`MALFORMED_JSON`, `REQUEST_TOO_LARGE`, `DUPLICATE_QUESTION_ID`,
+`INVALID_QUESTION`, `INVALID_MODEL_OUTPUT`, `MODEL_TIMEOUT`,
+`MODEL_UNAVAILABLE`, `CONTEXT_LIMIT_EXCEEDED`, `INSUFFICIENT_EVIDENCE`,
+`AMBIGUOUS_EVIDENCE`, `UNSUPPORTED_QUESTION`, `AGGREGATION_TIE`,
+`REPLAY_CONFIGURATION_UNAVAILABLE`, and `JEV_ADAPTER_UNMAPPABLE_RESULT`;
+every other code points at its offending field (for example
+`/contract_version`, `/model`, `/inference/seed`). Within a per-question
+result, the empty-string path is sufficient because the result's own key
+identifies the question. `message` is
 a stable contract description, never a backend exception, stack trace, raw
 model output, or prompt content.
 
@@ -369,7 +377,9 @@ configuration recorded in it rather than using a server-side trace ID or
 storage lookup. The replay envelope is validated with the same structural
 rules and codes as an evaluation envelope before any model call: malformed
 JSON, unknown or missing envelope fields, and a `trace` value that is not a
-closed object carrying the required `trace_id` and `parent_trace_id` are
+closed object carrying the required `trace_id` and `parent_trace_id` members
+(they must be present; `parent_trace_id`'s value may be null, as it is for an
+original evaluation) are
 structural rejections with a JSON Pointer path into the replay body, such as
 `/trace/trace_id`.
 
@@ -409,7 +419,11 @@ rules and codes as the native envelope before any conversion or model call. An
 input that fails structural validation produces the adapter result shape with
 `answers` and `local_judge` both null and `error` containing the structural
 code with a JSON Pointer path into the raw Jev body;
-`JEV_ADAPTER_UNMAPPABLE_RESULT` is never used for input validation.
+`JEV_ADAPTER_UNMAPPABLE_RESULT` is never used for input validation. Because
+the input has no `contract_version`, `policy`, or `inference`, the codes that
+concern those fields cannot fire on this face; the reachable structural codes
+here are `MALFORMED_JSON`, `MISSING_FIELD`, `UNKNOWN_FIELD`, `INVALID_FIELD`,
+and `INVALID_QUESTIONS_MAP`.
 
 Its result is a closed adapter object with three fields:
 
@@ -426,7 +440,8 @@ Its result is a closed adapter object with three fields:
 ```
 
 `answers` contains only the documented Jev-shaped answer map when every
-requested question maps successfully; otherwise it is null. `local_judge` is a
+requested question maps successfully; otherwise (an unmappable result or a
+structurally invalid input) it is null. `local_judge` is a
 documented extension, not a Jev field: `traces` is the map of native inline
 result traces keyed by question ID, and the `local_judge` object carries the
 mandatory semantics disclosure in
@@ -501,7 +516,9 @@ are defined by each access adapter, not here.
 Stage 1 creates a versioned corpus. Each case records state, policy,
 questions, exact menu or rubric, expected answer or allowed-answer set, model
 profile, contract version, and evidence rationale. Each case also records
-`inference` (optional, with the request inference shape and ranges),
+`inference` (optional, with the request inference shape, ranges, and defaults
+— distinct from the adapter's fixed sampling, so gate-1 fixtures that need
+n > 1 set `sample_count` explicitly),
 `matched_case_id` (the ID of the paired base case; required non-null for
 adversarial and metamorphic cases and null otherwise, and it must reference an
 existing case in the same corpus version), and `metamorphic_relation` (one of
