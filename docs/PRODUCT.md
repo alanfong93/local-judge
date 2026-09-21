@@ -18,10 +18,11 @@ Accept state, instructions, criteria, and typed questions; obtain judgments from
 - Keep inference and request data local, without per-request hosted inference API charges.
 - Report repeated-sample agreement as **agreement**, not calibrated confidence or probability of correctness. Noul's estimated probability that a statement is true is distinct from both agreement and the probability that an answer is correct. Any compatibility-field mapping must disclose those distinctions.
 - Reject invalid outputs or report inability to answer rather than inventing a valid-looking judgment. Typed validity is not evidence that an answer is correct.
+- Make each judgment traceable to its supplied state, typed question, instructions, criteria, exact candidate menu where applicable, model identity, relevant inference settings, and result or failure. Preserve applicable rubric, schema, and threshold versions for replay; replay does not promise identical stochastic results.
 
 # Done when
 
-Choice, Score, and Noul work according to their documented semantics through all three access routes; supported Jev-subset requests behave as documented; invalid outputs cannot escape validation; local operation, failure reporting, and agreement labelling are demonstrated; and representative judgments have evidence of usefulness beyond response-shape compliance.
+Choice, Score, and Noul work according to their documented semantics through all three access routes; supported Jev-subset requests behave as documented; invalid outputs cannot escape validation; local operation, failure reporting, agreement labelling, and traceability are demonstrated; and representative normal, ambiguous, and adversarial judgments have evidence of usefulness beyond response-shape compliance.
 
 # Not this project
 

@@ -765,10 +765,12 @@
                   "code": {
                     "enum": [
                       "MALFORMED_JSON",
+                      "REQUEST_TOO_LARGE",
                       "MISSING_FIELD",
                       "UNKNOWN_FIELD",
                       "INVALID_FIELD",
-                      "INVALID_QUESTIONS_MAP"
+                      "INVALID_QUESTIONS_MAP",
+                      "UNSUPPORTED_LOCAL_MODEL"
                     ]
                   }
                 },
