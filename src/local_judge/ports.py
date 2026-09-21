@@ -19,6 +19,7 @@ class TransportOutcome(StrEnum):
     TIMEOUT = "timeout"
     UNAVAILABLE = "unavailable"
     CONTEXT_OVERFLOW = "context_overflow"
+    MALFORMED_RESPONSE = "malformed_response"
 
 
 @dataclass(frozen=True)
@@ -38,4 +39,5 @@ class LocalModelPort(Protocol):
         model: str,
         rendered_messages: Sequence[Mapping[str, Any]],
         inference: Inference,
+        response_schema: Mapping[str, Any] | None = None,
     ) -> RawAttempt: ...
