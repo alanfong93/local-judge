@@ -101,18 +101,10 @@ class SamplingOrchestrator:
             attempt_records = tuple(self._executor.classify(raw) for raw in raw_attempts)
             result = self._executor.run(question_id, question, envelope.state, attempt_records)
         except Exception as exc:  # isolation: one question never aborts its siblings
-            result = self._question_error_fallback(
+            return self._question_error_fallback(
                 envelope, question_id, question, accepted_request, exc,
                 attempt_records=attempt_records, rendered_messages=rendered_messages,
             )
-            trace = self._build_trace(
-                envelope, question, accepted_request,
-                attempts=result.trace.attempts,
-                rendered_messages=result.trace.rendered_messages,
-                aggregate=None,
-                trace_id=result.trace.trace_id,
-            )
-            return replace(result, trace=trace)
         trace = self._build_trace(
             envelope,
             question,
@@ -123,38 +115,6 @@ class SamplingOrchestrator:
             trace_id=result.trace.trace_id,
         )
         return replace(result, trace=trace)
-
-    def _placeholder_trace(self, envelope, question, attempt_records, messages) -> TraceRecord:
-        """Executor results arrive traceless; the orchestrator owns trace assembly."""
-        return TraceRecord(
-            trace_id=str(uuid.uuid4()),
-            parent_trace_id=None,
-            trace_schema_version="v1",
-            contract_version="v1",
-            prompt_template_version=self._versions["prompt_template_version"],
-            output_schema_version=self._versions["output_schema_version"],
-            aggregation_version=self._versions["aggregation_version"],
-            policy_version=envelope.policy.version,
-            accepted_request=self._accepted_request(envelope),
-            canonical_request_hash=canonical_request_hash(self._accepted_request(envelope)),
-            state=envelope.state,
-            question=question,
-            criteria=question.get("criteria") if isinstance(question, Mapping) else None,
-            policy_provenance="caller-declared-unverified",
-            rendered_messages=list(messages),
-            resolved_inference={
-                "sample_count": envelope.inference.sample_count,
-                "temperature": envelope.inference.temperature,
-                "seed": envelope.inference.seed,
-                "timeout_ms": envelope.inference.timeout_ms,
-            },
-            backend=self._backend,
-            model=envelope.model,
-            model_digest=self._model_digest,
-            local_runtime_version=self._local_runtime_version,
-            attempts=tuple(attempt_records),
-            aggregate=None,
-        )
 
     def _build_trace(self, envelope, question, accepted_request, attempts, rendered_messages, aggregate, trace_id):
         return TraceRecord(
@@ -276,6 +236,8 @@ def resolve_replay(trace: TraceRecord, artifact_registry: Mapping[str, Mapping[s
     model_artifact = artifact_registry.get("models", {}).get(trace.model)
     if not missing and trace.model_digest is not None:
         recorded = getattr(model_artifact, "digest", None)
+        if recorded is None and isinstance(model_artifact, Mapping):
+            recorded = model_artifact.get("digest")
         if recorded != trace.model_digest:
             missing = True  # the resolved artifact is not the recorded model
     if missing:

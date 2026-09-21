@@ -62,11 +62,13 @@ def canonical_json(value) -> str:
     if isinstance(value, list):
         return "[" + ",".join(canonical_json(item) for item in value) + "]"
     if isinstance(value, dict):
+        for key in value:
+            # validate before sorting: the sort key function assumes str keys
+            if not isinstance(key, str):
+                raise ValueError("object keys must be strings for canonical JSON")
         # RFC 8785 sorts property names by UTF-16 code units.
         items = []
         for key in sorted(value, key=lambda k: k.encode("utf-16be", "surrogatepass")):
-            if not isinstance(key, str):
-                raise ValueError("object keys must be strings for canonical JSON")
             items.append(json.dumps(key, ensure_ascii=False) + ":" + canonical_json(value[key]))
         return "{" + ",".join(items) + "}"
     raise ValueError(f"value is not JSON: {type(value)!r}")

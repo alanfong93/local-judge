@@ -29,6 +29,7 @@ from local_judge.orchestrator import (
     SamplingTypeExecutor,
     resolve_replay,
 )
+from dataclasses import replace
 from local_judge.ports import RawAttempt, TransportOutcome
 
 
@@ -362,6 +363,8 @@ def test_canonical_number_and_ordering_boundaries():
     assert cj({"é": 1, "e": 2}) == '{"e":2,"é":1}'
     # UTF-16 code-unit ordering: an astral-plane key sorts BEFORE "\u00e9"-class BMP keys
     assert cj({"😀": 1, "é": 2}) == '{"é":2,"😀":1}'
+    # discriminating pair: UTF-16 units (D83D < FFFD) vs code points (FFFD < 1F600)
+    assert cj({"�": 1, "😀": 2}) == '{"😀":2,"�":1}'
 
 
 def test_failed_question_preserves_recorded_evidence():
@@ -400,3 +403,46 @@ def test_orchestrator_passes_typed_results_through_untouched():
     assert result.answer is sentinel_answer
     assert result.trace.aggregate is sentinel_answer
     assert result.status is ResultStatus.ANSWERED
+
+
+def test_replay_digest_verification():
+    trace = minimal_trace()
+    trace = replace(trace, model_digest="d" * 64)
+    import types
+
+    matching = types.SimpleNamespace(digest="d" * 64)
+    mismatching = types.SimpleNamespace(digest="e" * 64)
+    dict_registry = {
+        "prompt_templates": {"p1": object()},
+        "output_schemas": {"o1": object()},
+        "aggregations": {"a1": object()},
+        "models": {"qwen3:8b": {"digest": "d" * 64}},
+    }
+    from local_judge import RejectionResponse
+
+    resolved = resolve_replay(trace, {
+        "prompt_templates": {"p1": object()},
+        "output_schemas": {"o1": object()},
+        "aggregations": {"a1": object()},
+        "models": {"qwen3:8b": matching},
+    })
+    assert isinstance(resolved, ResolvedReplay)
+    rejected = resolve_replay(trace, {
+        "prompt_templates": {"p1": object()},
+        "output_schemas": {"o1": object()},
+        "aggregations": {"a1": object()},
+        "models": {"qwen3:8b": mismatching},
+    })
+    assert isinstance(rejected, RejectionResponse)
+    rejected_dict = resolve_replay(trace, dict_registry)
+    assert isinstance(rejected_dict, ResolvedReplay)
+
+
+def test_non_string_object_keys_are_rejected():
+    import pytest
+
+    from local_judge.canonical import canonical_json
+
+    with pytest.raises(ValueError):
+        canonical_json({1: "a"})
+
