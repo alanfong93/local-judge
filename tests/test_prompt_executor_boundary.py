@@ -197,3 +197,67 @@ def test_typed_aggregation_stays_outside_this_boundary():
     source = inspect.getsource(base)
     for banned in ("vote_share", "sum(", "max("):
         assert banned not in source, banned
+
+
+def test_state_and_policy_never_cross_regions_with_sentinel_values():
+    compiler = VersionedPromptCompiler(template_version="prompt-1")
+    sentinel_state = {"ticket": "SENTINEL-STATE-9x7"}
+    sentinel_id = "SENTINEL-ID-4q2"
+    rendered, _ = compiler.render(sentinel_id, choice_question(), sentinel_state)
+    system, policy, evidence = rendered
+    assert "SENTINEL-STATE-9x7" not in system["content"]
+    assert "SENTINEL-STATE-9x7" not in policy["content"]
+    assert "SENTINEL-ID-4q2" not in system["content"]
+    assert "SENTINEL-ID-4q2" not in policy["content"]
+    assert "SENTINEL-ID-4q2" not in evidence["content"]
+    # different IDs produce identical renders (id is a correlation key only)
+    other, _ = compiler.render("OTHER-ID", choice_question(), sentinel_state)
+    assert other == rendered
+
+
+def test_revalidation_rejects_malformed_and_foreign_shapes():
+    executor = make_executor("choice")
+    for bad in ("{not json", "null", "true", '["technical"]', '{"choice":"technical"}',
+                '{"reason": "WHIM"}', '{"reason": "INSUFFICIENT_EVIDENCE", "extra": 1}'):
+        record = executor.classify_sample(RawAttempt(outcome=TransportOutcome.OK, output=bad), choice_question())
+        assert record.terminal_error is not None and record.terminal_error.code == "INVALID_MODEL_OUTPUT", bad
+
+
+def test_output_schema_matches_the_enforced_union():
+    compiler = VersionedPromptCompiler(template_version="prompt-1")
+    _, schema = compiler.render("q", choice_question(), "s")
+    branches = schema["oneOf"]
+    assert branches[0] == {"type": "string", "enum": ["billing", "technical"]}
+    inability = branches[1]
+    assert inability["required"] == ["reason"]
+    assert inability["additionalProperties"] is False
+    assert inability["properties"]["reason"]["enum"] == [
+        "INSUFFICIENT_EVIDENCE", "AMBIGUOUS_EVIDENCE", "UNSUPPORTED_QUESTION"
+    ]
+
+
+def test_aggregate_hook_is_guarded():
+    from local_judge.executors.base import InabilitySignal
+
+    # malformed tuple -> ValueError (developer bug, not a contract outcome)
+    executor = make_executor("noul", aggregate=lambda s: ("inability",))
+    attempts = [executor.classify_sample(raw_ok("0.5"))]
+    with pytest.raises(ValueError):
+        executor.run("q", noul_question(), "s", attempts)
+
+    # unknown inability code -> ValueError
+    executor_bad_code = make_executor("noul", aggregate=lambda s: ("inability", "WHIM"))
+    with pytest.raises(ValueError):
+        executor_bad_code.run("q", noul_question(), "s", attempts)
+
+    # InabilitySignal raised by the aggregate is caught and mapped
+    executor_signal = make_executor("noul", aggregate=raise_inability_signal)
+    result = executor_signal.run("q", noul_question(), "s", attempts)
+    assert result.status is ResultStatus.INABILITY_TO_ANSWER
+    assert result.error.code == "AMBIGUOUS_EVIDENCE"
+
+
+def raise_inability_signal(samples):
+    from local_judge.executors.base import InabilitySignal
+
+    raise InabilitySignal("AMBIGUOUS_EVIDENCE", "the aggregate declared an inability")

@@ -160,8 +160,16 @@ class NativeTypeExecutor:
                     question, records, ResultStatus.QUESTION_ERROR,
                     error=record.terminal_error, answer=None,
                 )
-        outcome = self.aggregate(aggregate_samples)
-        if isinstance(outcome, tuple) and outcome and outcome[0] == "inability":
+        try:
+            outcome = self.aggregate(aggregate_samples)
+        except InabilitySignal as signal:
+            inability = ErrorObject(code=signal.code, path="", message="the aggregate declared an inability")
+            return self._result(
+                question, records, ResultStatus.INABILITY_TO_ANSWER, error=inability, answer=None,
+            )
+        if isinstance(outcome, tuple) and len(outcome) == 2 and outcome[0] == "inability":
+            if outcome[1] not in INABILITY_CODES:
+                raise ValueError(f"aggregate declared unknown inability code: {outcome[1]!r}")
             inability = ErrorObject(code=outcome[1], path="", message="the aggregate declared an inability")
             return self._result(
                 question, records, ResultStatus.INABILITY_TO_ANSWER, error=inability, answer=None,
@@ -180,8 +188,8 @@ class NativeTypeExecutor:
             parent_trace_id=None,
             trace_schema_version="v1",
             contract_version="v1",
-            prompt_template_version="prompt-1",
-            output_schema_version="schema-1",
+            prompt_template_version=self.template_version,
+            output_schema_version=self.output_schema_version,
             aggregation_version="a1",
             policy_version="unspecified",
             accepted_request=dict(_PLACEHOLDER_ACCEPTED_REQUEST),

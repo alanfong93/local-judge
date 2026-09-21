@@ -13,6 +13,8 @@ import json
 from dataclasses import dataclass
 from typing import Mapping
 
+VALID_INABILITY_CODES = ("INSUFFICIENT_EVIDENCE", "AMBIGUOUS_EVIDENCE", "UNSUPPORTED_QUESTION")
+
 _SAMPLE_UNION_CONTRACT = (
     "Respond with exactly one JSON value chosen from the sample union for the "
     "requested question type: a type-valid answer, or an explicit inability "
@@ -55,33 +57,36 @@ class VersionedPromptCompiler:
         return [system, policy, evidence], output_schema
 
     def _output_schema(self, qtype, question) -> dict:
+        """Exactly the sample union the base executor enforces locally."""
+        inability_object = {
+            "type": "object",
+            "properties": {
+                "reason": {"enum": list(VALID_INABILITY_CODES)}
+            },
+            "required": ["reason"],
+            "additionalProperties": False,
+        }
         if qtype == "choice":
+            menu = sorted((question.get("criteria") or {}).keys())
             return {
                 "oneOf": [
-                    {
-                        "type": "object",
-                        "properties": {
-                            "choice": {"enum": sorted((question.get("criteria") or {}).keys())},
-                            "reason": {"type": "string"},
-                        },
-                    },
-                    {"type": "string"},
+                    {"type": "string", "enum": menu},
+                    inability_object,
                 ]
             }
         if qtype == "score":
+            top = max(len(question.get("criteria") or []) - 1, 0)
             return {
                 "oneOf": [
-                    {"type": "integer", "minimum": 0},
-                    {"type": "object", "properties": {"reason": {"type": "string"}}},
-                    {"type": "string"},
+                    {"type": "integer", "minimum": 0, "maximum": top},
+                    inability_object,
                 ]
             }
         if qtype == "noul":
             return {
                 "oneOf": [
                     {"type": "number", "minimum": 0, "maximum": 1},
-                    {"type": "object", "properties": {"reason": {"type": "string"}}},
-                    {"type": "string"},
+                    inability_object,
                 ]
             }
         raise ValueError(f"unknown question type: {qtype!r}")
