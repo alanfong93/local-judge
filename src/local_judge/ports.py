@@ -19,6 +19,7 @@ class TransportOutcome(StrEnum):
     TIMEOUT = "timeout"
     UNAVAILABLE = "unavailable"
     CONTEXT_OVERFLOW = "context_overflow"
+    MALFORMED_RESPONSE = "malformed_response"
 
 
 @dataclass(frozen=True)
