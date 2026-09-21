@@ -5,6 +5,8 @@ menu (docs/CONTRACT.md 'Choice'). The winner is the unique largest count; a
 tie for the largest count is inability_to_answer with AGGREGATION_TIE.
 """
 
+from typing import Mapping
+
 from local_judge.executors.base import NativeTypeExecutor
 
 
