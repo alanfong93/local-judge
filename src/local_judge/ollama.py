@@ -184,7 +184,7 @@ class UrllibOllamaTransport:
         deadline = time.monotonic() + timeout_ms / 1000
 
         def _remaining_seconds() -> float:
-            return max(deadline - time.monotonic(), 0.001)
+            return deadline - time.monotonic()
 
         try:
             handle = self._opener.open(request, timeout=timeout_ms / 1000)
@@ -210,16 +210,27 @@ class UrllibOllamaTransport:
                 body = b"".join(chunks).decode("utf-8", "replace")
             return TransportResponse(status_code=handle.status, body=body)
         except urllib.error.HTTPError as exc:
-            # bound the error-body read to the remaining attempt budget too
-            remaining = _remaining_seconds()
+            # bound the error-body read to the remaining attempt budget too:
+            # per-op socket timeout where reachable, deadline checks between chunks
             error_sock = getattr(getattr(exc, "fp", None), "raw", None)
             error_sock = getattr(error_sock, "_sock", None)
-            if error_sock is not None:
-                try:
-                    error_sock.settimeout(remaining)
-                except (AttributeError, OSError):
-                    pass
-            return TransportResponse(status_code=exc.code, body=exc.read(65536).decode("utf-8", "replace"))
+            chunks = []
+            while True:
+                remaining = _remaining_seconds()
+                if remaining <= 0:
+                    raise OllamaTransportTimeout("attempt deadline exceeded")
+                if error_sock is not None:
+                    try:
+                        error_sock.settimeout(remaining)
+                    except (AttributeError, OSError):
+                        error_sock = None
+                part = exc.read(65536)
+                if not part:
+                    break
+                chunks.append(part)
+            return TransportResponse(
+                status_code=exc.code, body=b"".join(chunks).decode("utf-8", "replace")
+            )
         except urllib.error.URLError as exc:
             if isinstance(getattr(exc, "reason", None), TimeoutError):
                 raise OllamaTransportTimeout(str(exc)) from exc
