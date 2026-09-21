@@ -26,28 +26,6 @@ from local_judge.models import (
 )
 from local_judge.ports import RawAttempt
 
-_MECHANICAL_TERMINAL_CODES = {
-    "TIMEOUT": "MODEL_TIMEOUT",
-    "UNAVAILABLE": "MODEL_UNAVAILABLE",
-    "CONTEXT_OVERFLOW": "CONTEXT_LIMIT_EXCEEDED",
-    "MALFORMED_RESPONSE": "INVALID_MODEL_OUTPUT",
-}
-
-
-def _mechanical_attempt_record(index: int, raw: RawAttempt) -> AttemptRecord:
-    """Attempt record from transport facts only: raw output plus terminal outcome."""
-    outcome_name = raw.outcome.value.upper()
-    code = _MECHANICAL_TERMINAL_CODES.get(raw.outcome.value)
-    terminal = ErrorObject(code=code, path="", message=f"transport outcome: {outcome_name}") if code else None
-    return AttemptRecord(
-        raw_output=raw.output or "",
-        parsed_value=None,
-        validation_outcome=raw.outcome.value,
-        timestamp=_rfc3339_now(index),
-        terminal_error=terminal,
-    )
-
-
 def _rfc3339_now(index: int) -> str:
     seconds, fraction = divmod(time.time(), 1)
     return time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime(seconds)) + f".{int(fraction * 1000):03d}Z"
@@ -106,36 +84,45 @@ class SamplingOrchestrator:
 
     def run_question(self, envelope: RequestEnvelope, question_id: str, question: Mapping[str, Any]) -> ResultEntry:
         accepted_request = self._accepted_request(envelope)
+        rendered_messages: list = []
+        attempt_records: tuple = ()
         try:
-            result = self._execute(envelope, question_id, question, accepted_request)
+            messages = self._executor.render_messages(question_id, question, envelope.state)
+            rendered_messages = list(messages)
+            raw_attempts: list[RawAttempt] = []
+            for _ in range(envelope.inference.sample_count):
+                raw_attempts.append(
+                    self._port.attempt(
+                        envelope.model,
+                        messages,
+                        envelope.inference,
+                    )
+                )
+            attempt_records = tuple(self._executor.classify(raw) for raw in raw_attempts)
+            result = self._executor.run(question_id, question, envelope.state, attempt_records)
         except Exception as exc:  # isolation: one question never aborts its siblings
-            result = self._question_error_fallback(envelope, question_id, question, accepted_request, exc)
+            result = self._question_error_fallback(
+                envelope, question_id, question, accepted_request, exc,
+                attempt_records=attempt_records, rendered_messages=rendered_messages,
+            )
+            trace = self._build_trace(
+                envelope, question, accepted_request,
+                attempts=result.trace.attempts,
+                rendered_messages=result.trace.rendered_messages,
+                aggregate=None,
+                trace_id=result.trace.trace_id,
+            )
+            return replace(result, trace=trace)
         trace = self._build_trace(
             envelope,
             question,
             accepted_request,
-            attempts=result.trace.attempts,
-            rendered_messages=result.trace.rendered_messages,
+            attempts=attempt_records,
+            rendered_messages=rendered_messages,
             aggregate=result.answer,
             trace_id=result.trace.trace_id,
         )
         return replace(result, trace=trace)
-
-    def _execute(self, envelope, question_id, question, accepted_request) -> ResultEntry:
-        messages = self._executor.render_messages(question_id, question, envelope.state)
-        raw_attempts: list[RawAttempt] = []
-        for _ in range(envelope.inference.sample_count):
-            raw_attempts.append(
-                self._port.attempt(
-                    envelope.model,
-                    messages,
-                    envelope.inference,
-                )
-            )
-        attempt_records = tuple(self._executor.classify(raw) for raw in raw_attempts)
-        result = self._executor.run(question_id, question, envelope.state, attempt_records)
-        placeholder = self._placeholder_trace(envelope, question, attempt_records, messages)
-        return replace(result, trace=placeholder)
 
     def _placeholder_trace(self, envelope, question, attempt_records, messages) -> TraceRecord:
         """Executor results arrive traceless; the orchestrator owns trace assembly."""
@@ -200,7 +187,16 @@ class SamplingOrchestrator:
             aggregate=aggregate,
         )
 
-    def _question_error_fallback(self, envelope, question_id, question, accepted_request, exc: Exception) -> ResultEntry:
+    def _question_error_fallback(
+        self,
+        envelope,
+        question_id,
+        question,
+        accepted_request,
+        exc: Exception,
+        attempt_records: tuple = (),
+        rendered_messages: list | None = None,
+    ) -> ResultEntry:
         """Isolation boundary: an executor crash becomes that question's error only."""
         trace = TraceRecord(
             trace_id=str(uuid.uuid4()),
@@ -217,7 +213,7 @@ class SamplingOrchestrator:
             question=question,
             criteria=question.get("criteria") if isinstance(question, Mapping) else None,
             policy_provenance="caller-declared-unverified",
-            rendered_messages=[],
+            rendered_messages=list(rendered_messages or []),
             resolved_inference={
                 "sample_count": envelope.inference.sample_count,
                 "temperature": envelope.inference.temperature,
@@ -228,7 +224,7 @@ class SamplingOrchestrator:
             model=envelope.model,
             model_digest=self._model_digest,
             local_runtime_version=self._local_runtime_version,
-            attempts=(),
+            attempts=tuple(attempt_records),
             aggregate=None,
         )
         return ResultEntry(
@@ -277,6 +273,11 @@ def resolve_replay(trace: TraceRecord, artifact_registry: Mapping[str, Mapping[s
         or trace.aggregation_version not in artifact_registry.get("aggregations", {})
         or trace.model not in artifact_registry.get("models", {})
     )
+    model_artifact = artifact_registry.get("models", {}).get(trace.model)
+    if not missing and trace.model_digest is not None:
+        recorded = getattr(model_artifact, "digest", None)
+        if recorded != trace.model_digest:
+            missing = True  # the resolved artifact is not the recorded model
     if missing:
         return RejectionResponse(
             contract_version="v1",

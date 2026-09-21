@@ -140,6 +140,36 @@ def versions():
     }
 
 
+
+def minimal_trace():
+    return TraceRecord(
+        trace_id="00000000-0000-4000-8000-000000000099",
+        parent_trace_id=None,
+        trace_schema_version="v1",
+        contract_version="v1",
+        prompt_template_version="p1",
+        output_schema_version="o1",
+        aggregation_version="a1",
+        policy_version="p1-policy",
+        accepted_request={"contract_version": "v1", "state": "s", "model": "qwen3:8b",
+                          "policy": {"version": "p"}, "inference": {},
+                          "questions": {"q": {"type": "choice", "instructions": "i"}}},
+        canonical_request_hash="a" * 64,
+        state="s",
+        question={"type": "choice", "instructions": "i"},
+        criteria=None,
+        policy_provenance="caller-declared-unverified",
+        rendered_messages=[],
+        resolved_inference={"sample_count": 1, "temperature": 0, "seed": None, "timeout_ms": 1000},
+        backend="fake",
+        model="qwen3:8b",
+        model_digest=None,
+        local_runtime_version="test",
+        attempts=(),
+        aggregate=None,
+    )
+
+
 def test_exactly_sample_count_attempts_per_question():
     port = FakePort([f"out{i}" for i in range(5)])
     executor = FakeExecutor()
@@ -319,3 +349,54 @@ def test_replay_without_recorded_artifacts_is_rejected():
     assert isinstance(response, RejectionResponse)
     assert response.error.code == "REPLAY_CONFIGURATION_UNAVAILABLE"
     validate_against(response.to_dict(), "#/$defs/rejectedResponse")
+
+
+def test_canonical_number_and_ordering_boundaries():
+    from local_judge.canonical import canonical_json as cj
+
+    assert cj(1e-6) == "0.000001"
+    assert cj(1e-7) == "1e-7"
+    assert cj(1e21) == "1e+21"
+    assert cj(-0.0) == "0"
+    assert cj(100.0) == "100"
+    assert cj({"é": 1, "e": 2}) == '{"e":2,"é":1}'
+    # UTF-16 code-unit ordering: an astral-plane key sorts BEFORE "\u00e9"-class BMP keys
+    assert cj({"😀": 1, "é": 2}) == '{"é":2,"😀":1}'
+
+
+def test_failed_question_preserves_recorded_evidence():
+    port = FakePort(["a", "b"])
+    executor = FakeExecutor(fail_for=("bad",))
+    orch = SamplingOrchestrator(port=port, executor=executor, versions=versions(), backend="fake")
+    results = orch.run_questions(envelope(sample_count=2, questions={"bad": {"type": "noul", "instructions": "i"}}))
+    trace = results["bad"].trace
+    assert len(trace.attempts) == 2, "classified attempts must survive the executor failure"
+    assert [a.raw_output for a in trace.attempts] == ["a", "b"]
+    assert isinstance(trace.rendered_messages, list)
+
+
+def test_orchestrator_passes_typed_results_through_untouched():
+    sentinel_answer = {"choice": "x", "vote_share": {"x": 1}}
+    sentinel_aggregate = {"choice": "x", "vote_share": {"x": 1}}
+
+    class TypedExecutor(FakeExecutor):
+        def run(self, question_id, question, state, attempts):
+            trace = minimal_trace()
+            return ResultEntry(
+                type_="choice",
+                status=ResultStatus.ANSWERED,
+                answer=sentinel_answer,
+                agreement=None,
+                requested_samples=len(attempts),
+                error=None,
+                trace=trace,
+            )
+
+    from conftest import TEST_PROFILE_SUPPORTED
+
+    port = FakePort(["raw"])
+    orch = SamplingOrchestrator(port=port, executor=TypedExecutor(), versions=versions(), backend="fake")
+    result = orch.run_question(envelope(sample_count=1), "q", {"type": "choice", "instructions": "i"})
+    assert result.answer is sentinel_answer
+    assert result.trace.aggregate is sentinel_answer
+    assert result.status is ResultStatus.ANSWERED
