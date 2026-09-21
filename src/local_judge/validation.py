@@ -35,6 +35,21 @@ class _DupDict(dict):
     dups: frozenset
 
 
+def _contains_lone_surrogates(value) -> bool:
+    """True if any string in the parsed document contains unpaired surrogates."""
+    if isinstance(value, str):
+        try:
+            value.encode("utf-8")
+        except UnicodeEncodeError:
+            return True
+        return False
+    if isinstance(value, dict):
+        return any(_contains_lone_surrogates(k) or _contains_lone_surrogates(v) for k, v in value.items())
+    if isinstance(value, list):
+        return any(_contains_lone_surrogates(item) for item in value)
+    return False
+
+
 def _reject_constant(name: str) -> None:
     raise ValueError(f"{name} is not JSON")
 
@@ -94,7 +109,13 @@ class RequestValidator:
                     StructuralCode.MALFORMED_JSON, "the request mapping is not JSON-representable"
                 ) from None
         elif isinstance(raw, str):
-            raw = raw.encode("utf-8")
+            try:
+                raw = raw.encode("utf-8")
+            except UnicodeEncodeError:
+                raise StructuralError(
+                    StructuralCode.MALFORMED_JSON,
+                    "the raw request contains unpaired surrogate characters",
+                ) from None
         if len(raw) > MAX_ENCODED_BYTES:
             raise StructuralError(
                 StructuralCode.REQUEST_TOO_LARGE,
@@ -114,6 +135,10 @@ class RequestValidator:
         if not isinstance(doc, _DupDict):
             raise StructuralError(
                 StructuralCode.MALFORMED_JSON, "the request body must be one JSON object"
+            )
+        if _contains_lone_surrogates(doc):
+            raise StructuralError(
+                StructuralCode.MALFORMED_JSON, "the request contains unpaired surrogate characters"
             )
         if doc.dups:
             first_dup = sorted(doc.dups)[0]
