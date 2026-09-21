@@ -50,9 +50,21 @@ def test_malformed_json():
     expect_rejection("{not json", StructuralCode.MALFORMED_JSON, "")
 
 
-def test_unsupported_contract_version():
+def test_non_json_constants_are_malformed():
+    expect_rejection(
+        '{"contract_version": "v1", "state": {"x": NaN}, "model": "qwen3:8b",'
+        ' "policy": {"version": "p"}, "inference": {}, "questions": {"q": {"type": "noul", "instructions": "i"}}}',
+        StructuralCode.MALFORMED_JSON,
+        "",
+    )
+
+
+def test_unsupported_contract_version_including_missing():
     expect_rejection(base_request(contract_version="v2"), StructuralCode.UNSUPPORTED_CONTRACT_VERSION, "/contract_version")
     expect_rejection(base_request(contract_version=1), StructuralCode.UNSUPPORTED_CONTRACT_VERSION, "/contract_version")
+    req = base_request()
+    del req["contract_version"]
+    expect_rejection(req, StructuralCode.UNSUPPORTED_CONTRACT_VERSION, "/contract_version")
 
 
 def test_missing_and_invalid_state():
@@ -130,6 +142,39 @@ def test_duplicate_question_id_in_raw_json():
     expect_rejection(raw, StructuralCode.DUPLICATE_QUESTION_ID, "")
 
 
+def test_duplicate_inside_a_question_object_is_not_structural():
+    """A dup inside one question's body is that question's typed concern, not a whole-request fault."""
+    raw = (
+        '{"contract_version": "v1", "state": "s", "model": "qwen3:8b",'
+        ' "policy": {"version": "p"}, "inference": {},'
+        ' "questions": {"a": {"type": "noul", "instructions": "i", "instructions": "j"}}}'
+    )
+    envelope = validator().parse(raw)
+    assert envelope.questions["a"].raw["instructions"] == "j"
+
+
+def test_duplicate_beats_question_count():
+    """A raw request with both defects reports the duplicate: dup is checked before count."""
+    members = ", ".join(
+        f'"q{i}": {{"type": "noul", "instructions": "yes?"}}' for i in range(1, 66)
+    )
+    raw = (
+        '{"contract_version": "v1", "state": "s", "model": "qwen3:8b",'
+        ' "policy": {"version": "p"}, "inference": {},'
+        ' "questions": {' + members + ', "q1": {"type": "noul", "instructions": "dup"}}}'
+    )
+    expect_rejection(raw, StructuralCode.DUPLICATE_QUESTION_ID, "")
+
+
+def test_root_duplicate_field_names_the_member():
+    expect_rejection(
+        '{"contract_version": "v1", "contract_version": "v2", "state": "s", "model": "m",'
+        ' "policy": {"version": "p"}, "inference": {}, "questions": {"q": {"type": "noul", "instructions": "i"}}}',
+        StructuralCode.INVALID_FIELD,
+        "/contract_version",
+    )
+
+
 def test_oversize_request_and_question_count():
     expect_rejection(
         base_request(state="x" * (256 * 1024)),
@@ -142,11 +187,19 @@ def test_oversize_request_and_question_count():
     expect_rejection(base_request(questions=questions), StructuralCode.REQUEST_TOO_LARGE, "")
 
 
+def test_escaped_pointer_tokens_for_hostile_keys():
+    req = base_request()
+    req["policy"] = {"version": "p", "a/b~c": 1}
+    expect_rejection(req, StructuralCode.UNKNOWN_FIELD, "/policy/a~1b~0c")
+
+
 def test_rejection_response_container_matches_published_schema():
     from local_judge import ErrorObject, RejectionResponse
 
-    err = ErrorObject(**load_fixture("structural-rejection.response.json")["error"])
-    response = RejectionResponse(contract_version="v1", model="qwen3:8b", error=err)
+    fixture_error = load_fixture("structural-rejection.response.json")["error"]
+    response = RejectionResponse(
+        contract_version="v1", model="qwen3:8b", error=ErrorObject(**fixture_error)
+    )
     as_dict = response.to_dict()
     from conftest import validate_against
 
@@ -156,3 +209,9 @@ def test_rejection_response_container_matches_published_schema():
 
 def test_non_object_request_body_is_malformed():
     expect_rejection("[1, 2, 3]", StructuralCode.MALFORMED_JSON, "")
+
+
+def json_dumps(obj):
+    import json
+
+    return json.dumps(obj, ensure_ascii=False)

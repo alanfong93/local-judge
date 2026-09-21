@@ -8,7 +8,16 @@ contract shape byte-for-byte in meaning.
 
 from dataclasses import dataclass, field
 from enum import StrEnum
+import re
 from typing import Any, Mapping
+
+_UUID_PATTERN = re.compile(
+    r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+)
+_HASH_PATTERN = re.compile(r"^[0-9a-f]{64}$")
+_TIMESTAMP_PATTERN = re.compile(
+    r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})$"
+)
 
 from local_judge.errors import (
     ErrorObject,
@@ -109,6 +118,8 @@ class AttemptRecord:
             raise ValueError(
                 f"an attempt can only end in a sample-level error or inability reason, got {self.terminal_error.code!r}"
             )
+        if not _TIMESTAMP_PATTERN.match(self.timestamp):
+            raise ValueError(f"attempt timestamp must be RFC 3339, got {self.timestamp!r}")
 
     @classmethod
     def from_dict(cls, d: Mapping[str, Any]) -> "AttemptRecord":
@@ -159,6 +170,18 @@ class TraceRecord:
     local_runtime_version: str
     attempts: tuple[AttemptRecord, ...] = field(default=())
     aggregate: Any = None
+
+    def __post_init__(self) -> None:
+        if not _UUID_PATTERN.match(self.trace_id):
+            raise ValueError(f"trace_id must be a UUID, got {self.trace_id!r}")
+        if self.parent_trace_id is not None and not _UUID_PATTERN.match(self.parent_trace_id):
+            raise ValueError(f"parent_trace_id must be a UUID or null, got {self.parent_trace_id!r}")
+        if not _HASH_PATTERN.match(self.canonical_request_hash):
+            raise ValueError(f"canonical_request_hash must be lowercase hex SHA-256, got {self.canonical_request_hash!r}")
+        if self.policy_provenance != "caller-declared-unverified":
+            raise ValueError("policy_provenance is fixed to caller-declared-unverified")
+        if self.contract_version != "v1":
+            raise ValueError("trace contract_version must be exactly 'v1'")
 
     @classmethod
     def from_dict(cls, d: Mapping[str, Any]) -> "TraceRecord":
@@ -226,7 +249,11 @@ class ResultEntry:
     agreement: float | None
     requested_samples: int
     error: ErrorObject | None
-    trace: TraceRecord | None
+    trace: TraceRecord
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.trace, TraceRecord):
+            raise ValueError("every result carries an inline trace record")
 
     @classmethod
     def from_dict(cls, d: Mapping[str, Any]) -> "ResultEntry":
@@ -239,7 +266,7 @@ class ResultEntry:
             agreement=d["agreement"],
             requested_samples=d["requested_samples"],
             error=ErrorObject(**d["error"]) if d["error"] is not None else None,
-            trace=TraceRecord.from_dict(d["trace"]) if d["trace"] is not None else None,
+            trace=TraceRecord.from_dict(d["trace"]),
         )
 
     def to_dict(self) -> dict:
@@ -250,7 +277,7 @@ class ResultEntry:
             "agreement": self.agreement,
             "requested_samples": self.requested_samples,
             "error": self.error.to_dict() if self.error is not None else None,
-            "trace": self.trace.to_dict() if self.trace is not None else None,
+            "trace": self.trace.to_dict(),
         }
 
 

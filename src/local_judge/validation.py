@@ -34,6 +34,15 @@ class _DupDict(dict):
     dups: frozenset
 
 
+def _reject_constant(name: str) -> None:
+    raise ValueError(f"{name} is not JSON")
+
+
+def _escape(token: str) -> str:
+    """RFC 6901 escape for one reference token."""
+    return token.replace("~", "~0").replace("/", "~1")
+
+
 def _pairs_hook(pairs: list[tuple[str, Any]]) -> _DupDict:
     keys = [k for k, _ in pairs]
     d = _DupDict(pairs)
@@ -69,7 +78,7 @@ class RequestValidator:
         elif isinstance(raw, str):
             raw = raw.encode("utf-8")
         try:
-            doc = json.loads(raw, object_pairs_hook=_pairs_hook)
+            doc = json.loads(raw, object_pairs_hook=_pairs_hook, parse_constant=_reject_constant)
         except (UnicodeDecodeError, ValueError):
             raise StructuralError(
                 StructuralCode.MALFORMED_JSON, "the raw request cannot be decoded as one JSON value"
@@ -84,22 +93,24 @@ class RequestValidator:
                 StructuralCode.MALFORMED_JSON, "the request body must be one JSON object"
             )
         if doc.dups:
+            first_dup = sorted(doc.dups)[0]
             raise StructuralError(
-                StructuralCode.INVALID_FIELD, "duplicate top-level field in the request body"
+                StructuralCode.INVALID_FIELD,
+                f"duplicate top-level field: {first_dup!r}",
+                f"/{_escape(first_dup)}",
             )
 
-        self._require(doc, "contract_version")
-        if doc["contract_version"] != "v1":
+        if "contract_version" not in doc or doc["contract_version"] != "v1":
             raise StructuralError(
                 StructuralCode.UNSUPPORTED_CONTRACT_VERSION,
-                "contract_version must be exactly 'v1'",
+                "contract_version must be present and exactly 'v1'",
                 "/contract_version",
             )
 
         for key in doc:
             if key not in _ENVELOPE_KEYS:
                 raise StructuralError(
-                    StructuralCode.UNKNOWN_FIELD, f"unknown top-level field: {key!r}", f"/{key}"
+                    StructuralCode.UNKNOWN_FIELD, f"unknown top-level field: {key!r}", f"/{_escape(key)}"
                 )
 
         self._require(doc, "state")
@@ -129,7 +140,7 @@ class RequestValidator:
         for key in policy_doc:
             if key != "version":
                 raise StructuralError(
-                    StructuralCode.UNKNOWN_FIELD, f"unknown policy field: {key!r}", f"/policy/{key}"
+                    StructuralCode.UNKNOWN_FIELD, f"unknown policy field: {key!r}", f"/policy/{_escape(key)}"
                 )
         policy = Policy(version=version)
 
@@ -142,7 +153,7 @@ class RequestValidator:
         for key in inference_doc:
             if key not in _INFERENCE_KEYS:
                 raise StructuralError(
-                    StructuralCode.UNKNOWN_FIELD, f"unknown inference field: {key!r}", f"/inference/{key}"
+                    StructuralCode.UNKNOWN_FIELD, f"unknown inference field: {key!r}", f"/inference/{_escape(key)}"
                 )
         inference = self._parse_inference(inference_doc)
 
@@ -169,15 +180,15 @@ class RequestValidator:
             raise StructuralError(
                 StructuralCode.INVALID_QUESTIONS_MAP, "questions must not be empty", "/questions"
             )
-        if len(questions_doc) > MAX_QUESTIONS:
-            raise StructuralError(
-                StructuralCode.REQUEST_TOO_LARGE,
-                f"a request may contain at most {MAX_QUESTIONS} questions",
-            )
         if questions_doc.dups:
             raise StructuralError(
                 StructuralCode.DUPLICATE_QUESTION_ID,
                 "duplicate question ID in raw JSON",
+            )
+        if len(questions_doc) > MAX_QUESTIONS:
+            raise StructuralError(
+                StructuralCode.REQUEST_TOO_LARGE,
+                f"a request may contain at most {MAX_QUESTIONS} questions",
             )
         for qid, qdoc in questions_doc.items():
             if not isinstance(qid, str) or not qid:
@@ -186,12 +197,7 @@ class RequestValidator:
                 )
             if not isinstance(qdoc, _DupDict):
                 raise StructuralError(
-                    StructuralCode.INVALID_FIELD, f"question {qid!r} must be an object", f"/questions/{qid}"
-                )
-            if qdoc.dups:
-                raise StructuralError(
-                    StructuralCode.DUPLICATE_QUESTION_ID,
-                    f"duplicate question ID in raw JSON: {qid!r}",
+                    StructuralCode.INVALID_FIELD, f"question {qid!r} must be an object", f"/questions/{_escape(qid)}"
                 )
         questions = {qid: QuestionEntry(id=qid, raw=qdoc) for qid, qdoc in questions_doc.items()}
 
