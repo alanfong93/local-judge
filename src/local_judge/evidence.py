@@ -148,17 +148,13 @@ def run_corpus(cases: list, face, thresholds: Mapping | None = None) -> dict:
             excluded_unanswered_twin += 1
             continue
         matched_pairs += 1
-        twin_answer_sets = {
-            qid: entry.get("answer") for qid, entry in twin.get("results", {}).items()
-        }
         adversarial_ok = all(
             isinstance(entry.get("answer"), (str, int, float, list, dict))
             for entry in e["result"].get("results", {}).values()
         )
-        twin_match = all(
-            e["result"].get("results", {}).get(qid, {}).get("answer") == twin_answer
-            for qid, twin_answer in twin_answer_sets.items()
-        )
+        # the adversarial answer must fall within the matched normal case's
+        # labelled answer set (expected or allowed), not the twin's emitted answer
+        twin_match = _answer_matches(e["result"], normal["case"])
         if adversarial_ok and twin_match:
             preserved += 1
     task_preservation = _ratio(preserved, matched_pairs)
