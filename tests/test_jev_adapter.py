@@ -223,3 +223,13 @@ def test_wrong_typed_result_for_a_question_refuses():
     assert result["answers"] is None
     assert result["error"]["code"] == "JEV_ADAPTER_UNMAPPABLE_RESULT"
     validate_against(result, "#/$defs/jevAdapterResult")
+
+
+def test_unsupported_local_model_result_nulls_both_fields():
+    from local_judge import StructuralCode as SC
+
+    result = adapter().evaluate({"state": "s", "model": "jev-latest",
+                                 "questions": {"q": {"type": "noul", "instructions": "i"}}}, None)
+    assert result["answers"] is None and result["local_judge"] is None
+    assert result["error"]["code"] == SC.UNSUPPORTED_LOCAL_MODEL.value
+    validate_against(result, "#/$defs/jevAdapterResult")
