@@ -134,7 +134,7 @@
       "additionalProperties": false
     },
     "errorObject": {
-      "description": "Closed error shape. path is an RFC 6901 JSON Pointer to the offending field when one exists, and the empty string for exactly the codes enumerated in pathEmptyStringCodes (docs/CONTRACT.md 'Validation and Execution').",
+      "description": "Closed error shape. path is an RFC 6901 JSON Pointer to the offending field when one exists, and the empty string for exactly the codes enumerated in the first branch (docs/CONTRACT.md 'Validation and Execution'); the coupling is enforced below.",
       "type": "object",
       "properties": {
         "code": {
@@ -166,7 +166,48 @@
         "message": { "type": "string", "minLength": 1 }
       },
       "required": ["code", "path", "message"],
-      "additionalProperties": false
+      "additionalProperties": false,
+      "oneOf": [
+        {
+          "properties": {
+            "code": {
+              "enum": [
+                "MALFORMED_JSON",
+                "REQUEST_TOO_LARGE",
+                "DUPLICATE_QUESTION_ID",
+                "INVALID_QUESTION",
+                "INVALID_MODEL_OUTPUT",
+                "MODEL_TIMEOUT",
+                "MODEL_UNAVAILABLE",
+                "CONTEXT_LIMIT_EXCEEDED",
+                "INSUFFICIENT_EVIDENCE",
+                "AMBIGUOUS_EVIDENCE",
+                "UNSUPPORTED_QUESTION",
+                "AGGREGATION_TIE",
+                "REPLAY_CONFIGURATION_UNAVAILABLE",
+                "JEV_ADAPTER_UNMAPPABLE_RESULT"
+              ]
+            },
+            "path": { "const": "" }
+          }
+        },
+        {
+          "properties": {
+            "code": {
+              "enum": [
+                "UNSUPPORTED_CONTRACT_VERSION",
+                "UNKNOWN_FIELD",
+                "MISSING_FIELD",
+                "INVALID_FIELD",
+                "INVALID_QUESTIONS_MAP",
+                "UNSUPPORTED_INFERENCE_SETTING",
+                "UNSUPPORTED_LOCAL_MODEL"
+              ]
+            },
+            "path": { "type": "string", "pattern": "^(/([^/~]|~[01])+)+$" }
+          }
+        }
+      ]
     },
     "structuralError": {
       "description": "Error object whose code is one of the structural codes (raised before any model call).",
@@ -238,8 +279,10 @@
         "validation_outcome": { "type": "string", "minLength": 1 },
         "timestamp": { "type": "string", "format": "date-time" },
         "terminal_error": {
+          "description": "A sample-level terminal error or inability reason; structural codes cannot terminate an attempt.",
           "oneOf": [
-            { "$ref": "#/$defs/errorObject" },
+            { "$ref": "#/$defs/questionError" },
+            { "$ref": "#/$defs/inabilityError" },
             { "type": "null" }
           ]
         }
@@ -340,6 +383,7 @@
       "additionalProperties": false
     },
     "answerChoice": {
+      "description": "vote_share carries every supplied option including zero-vote options; the key set equals the caller's menu (cross-document with the request, so not enforceable here, like the probabilities sum-to-1).",
       "type": "object",
       "properties": {
         "choice": { "$ref": "#/$defs/nonEmptyString" },
@@ -353,17 +397,18 @@
       "additionalProperties": false
     },
     "answerScore": {
+      "description": "legend and vote_share keys are the rubric positions as single decimal digits (criteria length 2-10 keeps keys in 0..9); binding them to a specific submission's length is contract prose.",
       "type": "object",
       "properties": {
         "score": { "type": "number", "minimum": 0, "maximum": 9 },
         "legend": {
           "type": "object",
-          "propertyNames": { "pattern": "^[0-9]+$" },
+          "propertyNames": { "pattern": "^[0-9]$" },
           "additionalProperties": { "$ref": "#/$defs/jsonContent" }
         },
         "vote_share": {
           "type": "object",
-          "propertyNames": { "pattern": "^[0-9]+$" },
+          "propertyNames": { "pattern": "^[0-9]$" },
           "additionalProperties": { "type": "number", "minimum": 0, "maximum": 1 }
         }
       },
@@ -421,6 +466,38 @@
       "required": ["type", "status", "answer", "agreement", "requested_samples", "error", "trace"],
       "additionalProperties": false,
       "allOf": [
+        {
+          "if": {
+            "properties": {
+              "status": { "const": "answered" },
+              "requested_samples": { "type": "integer", "minimum": 2 }
+            }
+          },
+          "then": {
+            "properties": { "agreement": { "type": "number", "minimum": 0, "maximum": 1 } }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "status": { "const": "answered" },
+              "requested_samples": { "const": 1 }
+            }
+          },
+          "then": {
+            "properties": { "agreement": { "const": null } }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "status": { "enum": ["inability_to_answer", "question_error"] }
+            }
+          },
+          "then": {
+            "properties": { "agreement": { "const": null } }
+          }
+        },
         {
           "if": { "properties": { "status": { "const": "answered" } } },
           "then": {
@@ -519,23 +596,10 @@
           "allOf": [
             { "$ref": "#/$defs/errorObject" },
             {
-              "properties": {
-                "code": {
-                  "enum": [
-                    "MALFORMED_JSON",
-                    "UNSUPPORTED_CONTRACT_VERSION",
-                    "UNKNOWN_FIELD",
-                    "MISSING_FIELD",
-                    "INVALID_FIELD",
-                    "INVALID_QUESTIONS_MAP",
-                    "DUPLICATE_QUESTION_ID",
-                    "REQUEST_TOO_LARGE",
-                    "UNSUPPORTED_INFERENCE_SETTING",
-                    "UNSUPPORTED_LOCAL_MODEL",
-                    "REPLAY_CONFIGURATION_UNAVAILABLE"
-                  ]
-                }
-              }
+              "anyOf": [
+                { "$ref": "#/$defs/structuralError" },
+                { "properties": { "code": { "const": "REPLAY_CONFIGURATION_UNAVAILABLE" } } }
+              ]
             }
           ]
         }
@@ -701,14 +765,10 @@
                   "code": {
                     "enum": [
                       "MALFORMED_JSON",
-                      "UNSUPPORTED_CONTRACT_VERSION",
-                      "UNKNOWN_FIELD",
                       "MISSING_FIELD",
+                      "UNKNOWN_FIELD",
                       "INVALID_FIELD",
-                      "INVALID_QUESTIONS_MAP",
-                      "REQUEST_TOO_LARGE",
-                      "UNSUPPORTED_INFERENCE_SETTING",
-                      "UNSUPPORTED_LOCAL_MODEL"
+                      "INVALID_QUESTIONS_MAP"
                     ]
                   }
                 },
