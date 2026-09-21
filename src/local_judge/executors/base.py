@@ -153,19 +153,21 @@ class NativeTypeExecutor:
             elif record.terminal_error.code in INABILITY_CODES:
                 return self._result(
                     question, records, ResultStatus.INABILITY_TO_ANSWER,
-                    error=record.terminal_error, answer=None,
+                    error=record.terminal_error, answer=None, agreement=None,
                 )
             else:
                 return self._result(
                     question, records, ResultStatus.QUESTION_ERROR,
-                    error=record.terminal_error, answer=None,
+                    error=record.terminal_error, answer=None, agreement=None,
                 )
+        agreement = self.agreement_for(aggregate_samples) if aggregate_samples else None
         try:
             outcome = self.aggregate(aggregate_samples)
         except InabilitySignal as signal:
             inability = ErrorObject(code=signal.code, path="", message="the aggregate declared an inability")
             return self._result(
                 question, records, ResultStatus.INABILITY_TO_ANSWER, error=inability, answer=None,
+                agreement=None,
             )
         if isinstance(outcome, tuple) and len(outcome) == 2 and outcome[0] == "inability":
             if outcome[1] not in INABILITY_CODES:
@@ -173,16 +175,24 @@ class NativeTypeExecutor:
             inability = ErrorObject(code=outcome[1], path="", message="the aggregate declared an inability")
             return self._result(
                 question, records, ResultStatus.INABILITY_TO_ANSWER, error=inability, answer=None,
+                agreement=None,
             )
         if outcome is None:
             return self._result(
                 question, records, ResultStatus.QUESTION_ERROR,
                 error=ErrorObject(code="INVALID_QUESTION", path="", message="no aggregate was produced"),
-                answer=None,
+                answer=None, agreement=None,
             )
-        return self._result(question, records, ResultStatus.ANSWERED, answer=outcome, error=None)
+        return self._result(
+            question, records, ResultStatus.ANSWERED, answer=outcome, error=None,
+            agreement=agreement if agreement is not None else None,
+        )
 
-    def _result(self, question, records, status, answer=None, error=None):
+    def agreement_for(self, parsed_samples: list) -> float | None:
+        """Per-type agreement; the base never computes one."""
+        return None
+
+    def _result(self, question, records, status, answer=None, error=None, agreement=None):
         trace = TraceRecord(
             trace_id=str(uuid.uuid4()),
             parent_trace_id=None,
@@ -211,7 +221,7 @@ class NativeTypeExecutor:
             type_=self.question_type,
             status=status,
             answer=answer,
-            agreement=None,
+            agreement=agreement,
             requested_samples=len(records),
             error=error,
             trace=trace,
