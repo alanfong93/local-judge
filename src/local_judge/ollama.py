@@ -10,6 +10,7 @@ model output into typed answers.
 import json
 import urllib.error
 import urllib.request
+from urllib.parse import urlparse
 from dataclasses import dataclass
 from typing import Any, Mapping, Sequence
 
@@ -45,6 +46,16 @@ class OllamaTransport:
         raise NotImplementedError
 
 
+def _require_loopback(base_url: str) -> None:
+    """Local profiles only: http URLs on loopback hosts, never arbitrary hosts."""
+    parsed = urlparse(base_url)
+    host = (parsed.hostname or "").lower()
+    if parsed.scheme != "http" or not (host == "localhost" or host == "::1" or host.startswith("127.")):
+        raise ValueError(
+            f"Ollama profiles must be local http endpoints on loopback, got {base_url!r}"
+        )
+
+
 @dataclass(frozen=True)
 class OllamaProfile:
     """A configured local Ollama profile."""
@@ -54,6 +65,9 @@ class OllamaProfile:
     supported_inference_settings: frozenset = frozenset(
         {"sample_count", "temperature", "timeout_ms"}
     )
+
+    def __post_init__(self) -> None:
+        _require_loopback(self.base_url)
 
 
 class OllamaModelPort:
@@ -75,6 +89,12 @@ class OllamaModelPort:
                 StructuralCode.UNSUPPORTED_LOCAL_MODEL,
                 f"requested model is not a configured local Ollama profile: {model!r}",
                 "/model",
+            )
+        if "temperature" not in profile.supported_inference_settings:
+            raise StructuralError(
+                StructuralCode.UNSUPPORTED_INFERENCE_SETTING,
+                "the selected profile cannot honor the requested inference setting: temperature",
+                "/inference/temperature",
             )
         if inference.seed is not None and "seed" not in profile.supported_inference_settings:
             raise StructuralError(
@@ -124,8 +144,18 @@ class OllamaModelPort:
         return options
 
 
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    """Redirects are never followed: local profiles only, one bounded attempt."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
 class UrllibOllamaTransport:
     """Real transport: one stdlib POST per attempt, timeout in milliseconds."""
+
+    def __init__(self, opener: urllib.request.OpenerDirector | None = None) -> None:
+        self._opener = opener or urllib.request.build_opener(_NoRedirect)
 
     def post(self, path: str, payload: Mapping[str, Any], timeout_ms: int) -> TransportResponse:
         body = json.dumps(payload, allow_nan=False).encode("utf-8")
@@ -133,8 +163,10 @@ class UrllibOllamaTransport:
             path, data=body, headers={"Content-Type": "application/json"}, method="POST"
         )
         try:
-            with urllib.request.urlopen(request, timeout=timeout_ms / 1000) as handle:
-                return TransportResponse(status_code=handle.status, body=handle.read().decode("utf-8"))
+            with self._opener.open(request, timeout=timeout_ms / 1000) as handle:
+                return TransportResponse(
+                    status_code=handle.status, body=handle.read().decode("utf-8", "replace")
+                )
         except urllib.error.HTTPError as exc:
             return TransportResponse(status_code=exc.code, body=exc.read().decode("utf-8", "replace"))
         except urllib.error.URLError as exc:
@@ -143,3 +175,7 @@ class UrllibOllamaTransport:
             raise OllamaTransportUnavailable(str(exc)) from exc
         except TimeoutError:
             raise OllamaTransportTimeout("timed out") from None
+        except OSError as exc:
+            # RemoteDisconnected, ConnectionResetError and friends are OSErrors:
+            # every expected transport failure becomes an explicit outcome.
+            raise OllamaTransportUnavailable(str(exc)) from exc

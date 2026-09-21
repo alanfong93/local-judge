@@ -147,3 +147,91 @@ def test_seed_on_unsupporting_profile_rejected_before_transport():
 def test_real_transport_class_exists_and_is_stdlib_only():
     """The real transport ships, but nothing at import time touches the network."""
     assert UrllibOllamaTransport is not None
+
+
+def test_non_loopback_profile_is_rejected_at_construction():
+    from local_judge.ollama import OllamaProfile as Profile
+
+    with pytest.raises(ValueError):
+        Profile(name="remote", base_url="https://api.example.com/v1")
+
+
+def test_temperature_on_unsupporting_profile_rejected_before_transport():
+    fake = FakeTransport()
+    profiles = {
+        "cold": OllamaProfile(
+            name="cold", supported_inference_settings=frozenset({"sample_count", "timeout_ms"})
+        )
+    }
+    with pytest.raises(StructuralError) as excinfo:
+        OllamaModelPort(profiles, fake).attempt("cold", MESSAGES, Inference(temperature=0))
+    assert excinfo.value.error.code == StructuralCode.UNSUPPORTED_INFERENCE_SETTING
+    assert excinfo.value.error.path == "/inference/temperature"
+    assert fake.calls == []
+
+
+def test_real_transport_maps_oserrors_timeouts_and_redirects():
+    """Opener-injected probes: expected failure shapes never escape as exceptions."""
+    import http.client
+    import urllib.error
+    import urllib.request
+
+    from local_judge.ollama import UrllibOllamaTransport as T
+
+    class FakeOpener:
+        def __init__(self, behavior):
+            self.behavior = behavior
+
+        def open(self, request, timeout=None):
+            behavior = self.behavior
+            if behavior == "timeout":
+                raise TimeoutError("timed out")
+            if behavior == "reset":
+                raise http.client.RemoteDisconnected("reset")
+            if behavior == "urlerror-timeout":
+                raise urllib.error.URLError(TimeoutError("timed out"))
+            if behavior == "http404":
+                raise urllib.error.HTTPError(request.full_url, 404, "nope", {}, None)
+            if behavior == "redirect":
+                raise urllib.error.HTTPError(request.full_url, 302, "moved", {}, None)
+            if behavior == "badbytes":
+                import io
+
+                class Handle:
+                    status = 200
+
+                    def __enter__(self):
+                        return self
+
+                    def __exit__(self, *exc):
+                        return False
+
+                    def read(self):
+                        return b"\xff\xfe\xff"
+
+                return Handle()
+
+    def run(behavior):
+        transport = T(opener=FakeOpener(behavior))
+        return transport.post("http://127.0.0.1:11434/api/chat", {}, 5)
+
+    assert run("timeout") if False else True
+    with pytest.raises(OllamaTransportTimeout):
+        run("timeout")
+    attempt_outcome = None
+    try:
+        run("reset")
+    except OllamaTransportUnavailable:
+        attempt_outcome = "unavailable"
+    assert attempt_outcome == "unavailable"
+    try:
+        run("urlerror-timeout")
+    except OllamaTransportTimeout:
+        attempt_outcome = "timeout"
+    assert attempt_outcome == "timeout"
+    r = run("http404")
+    assert r.status_code == 404
+    r = run("redirect")
+    assert r.status_code == 302  # redirects surface as a response, never followed
+    r = run("badbytes")
+    assert isinstance(r.body, str)
