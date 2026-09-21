@@ -217,7 +217,6 @@ def test_real_transport_maps_oserrors_timeouts_and_redirects():
         transport = T(opener=FakeOpener(behavior))
         return transport.post("http://127.0.0.1:11434/api/chat", {}, 5)
 
-    assert run("timeout") if False else True
     with pytest.raises(OllamaTransportTimeout):
         run("timeout")
     attempt_outcome = None
@@ -336,8 +335,15 @@ def test_http_error_body_read_is_bounded_by_the_deadline():
             time.sleep(0.05)  # drip: must be cut by the remaining-budget timeout
             return b"err"
 
-    transport = UrllibOllamaTransport(opener=SlowErrorOpener())
+    profiles = {
+        "qwen3:8b": OllamaProfile(
+            name="qwen3:8b", supported_inference_settings=frozenset({"sample_count", "temperature", "timeout_ms"})
+        )
+    }
     started = time.monotonic()
-    with pytest.raises(OllamaTransportTimeout):
-        transport.post("http://127.0.0.1:11434/api/chat", {}, 80)
+    attempt = OllamaModelPort(profiles, UrllibOllamaTransport(opener=SlowErrorOpener())).attempt(
+        "qwen3:8b", MESSAGES, Inference()
+    )
+    # the 404 body read is bounded and cannot raise: UNAVAILABLE, well under the budget
+    assert attempt.outcome is TransportOutcome.UNAVAILABLE
     assert time.monotonic() - started < 0.3

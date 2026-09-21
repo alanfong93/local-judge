@@ -210,27 +210,13 @@ class UrllibOllamaTransport:
                 body = b"".join(chunks).decode("utf-8", "replace")
             return TransportResponse(status_code=handle.status, body=body)
         except urllib.error.HTTPError as exc:
-            # bound the error-body read to the remaining attempt budget too:
-            # per-op socket timeout where reachable, deadline checks between chunks
-            error_sock = getattr(getattr(exc, "fp", None), "raw", None)
-            error_sock = getattr(error_sock, "_sock", None)
-            chunks = []
-            while True:
-                remaining = _remaining_seconds()
-                if remaining <= 0:
-                    raise OllamaTransportTimeout("attempt deadline exceeded")
-                if error_sock is not None:
-                    try:
-                        error_sock.settimeout(remaining)
-                    except (AttributeError, OSError):
-                        error_sock = None
-                part = exc.read(65536)
-                if not part:
-                    break
-                chunks.append(part)
-            return TransportResponse(
-                status_code=exc.code, body=b"".join(chunks).decode("utf-8", "replace")
-            )
+            # The error body is inessential: one bounded read (the response's
+            # own socket timeout bounds it), any failure yields an empty body.
+            try:
+                body = exc.read(65536).decode("utf-8", "replace")
+            except Exception:
+                body = ""
+            return TransportResponse(status_code=exc.code, body=body)
         except urllib.error.URLError as exc:
             if isinstance(getattr(exc, "reason", None), TimeoutError):
                 raise OllamaTransportTimeout(str(exc)) from exc
