@@ -216,6 +216,8 @@ class UrllibOllamaTransport:
         except urllib.error.HTTPError as exc:
             # The error body is inessential: one read bounded by the remaining
             # attempt budget (socket timeout); any failure yields an empty body.
+            if _remaining_seconds() <= 0:
+                raise OllamaTransportTimeout("attempt deadline exceeded")
             _set_remaining_timeout(exc, _remaining_seconds())
             try:
                 body = exc.read(65536).decode("utf-8", "replace")

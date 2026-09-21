@@ -381,3 +381,20 @@ def test_http_error_body_read_is_bounded_by_the_deadline():
     assert attempt.outcome is TransportOutcome.UNAVAILABLE
     assert time.monotonic() - started < 0.3
     assert timeouts and all(0 < t <= 0.08 for t in timeouts)
+
+
+def test_exhausted_deadline_skips_error_body_read():
+    import urllib.error
+
+    from local_judge.ollama import UrllibOllamaTransport
+
+    class LateErrorOpener:
+        def open(self, request, timeout=None):
+            time.sleep(0.09)  # budget (80ms) already gone when the 4xx arrives
+            raise urllib.error.HTTPError(request.full_url, 404, "nope", {}, None)
+
+    transport = UrllibOllamaTransport(opener=LateErrorOpener())
+    started = time.monotonic()
+    with pytest.raises(OllamaTransportTimeout):
+        transport.post("http://127.0.0.1:11434/api/chat", {}, 80)
+    assert time.monotonic() - started < 0.2
