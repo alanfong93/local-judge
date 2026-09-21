@@ -1,0 +1,133 @@
+{
+  "schema": "../../schemas/native-v1.schema.json",
+  "draft": "2020-12",
+  "note": "expect valid means the fixture MUST validate against its target; expect invalid means it MUST fail. Targets are JSON Pointers into native-v1.schema.json.",
+  "fixtures": [
+    {
+      "file": "choice-valid.request.json",
+      "case": "valid-choice",
+      "target": "#/$defs/requestEnvelope",
+      "expect": "valid"
+    },
+    {
+      "file": "choice-valid.response.json",
+      "case": "valid-choice",
+      "target": "#/$defs/nativeResponse",
+      "expect": "valid"
+    },
+    {
+      "file": "score-fractional.request.json",
+      "case": "valid-fractional-score",
+      "target": "#/$defs/requestEnvelope",
+      "expect": "valid"
+    },
+    {
+      "file": "score-fractional.response.json",
+      "case": "valid-fractional-score",
+      "target": "#/$defs/nativeResponse",
+      "expect": "valid"
+    },
+    {
+      "file": "noul-decile.request.json",
+      "case": "noul-decile-agreement",
+      "target": "#/$defs/requestEnvelope",
+      "expect": "valid"
+    },
+    {
+      "file": "noul-decile.response.json",
+      "case": "noul-decile-agreement",
+      "target": "#/$defs/nativeResponse",
+      "expect": "valid"
+    },
+    {
+      "file": "structural-rejection.request.json",
+      "case": "structural-rejection",
+      "target": "#/$defs/requestEnvelope",
+      "expect": "invalid"
+    },
+    {
+      "file": "structural-rejection.response.json",
+      "case": "structural-rejection",
+      "target": "#/$defs/rejectedResponse",
+      "expect": "valid"
+    },
+    {
+      "file": "malformed-question-sibling.request.json",
+      "case": "malformed-question-with-valid-sibling",
+      "target": "#/$defs/requestEnvelope",
+      "expect": "valid"
+    },
+    {
+      "file": "malformed-question-sibling.response.json",
+      "case": "malformed-question-with-valid-sibling",
+      "target": "#/$defs/nativeResponse",
+      "expect": "valid"
+    },
+    {
+      "file": "choice-tie.request.json",
+      "case": "choice-aggregation-tie",
+      "target": "#/$defs/requestEnvelope",
+      "expect": "valid"
+    },
+    {
+      "file": "choice-tie.response.json",
+      "case": "choice-aggregation-tie",
+      "target": "#/$defs/nativeResponse",
+      "expect": "valid"
+    },
+    {
+      "file": "model-timeout.response.json",
+      "case": "model-timeout",
+      "target": "#/$defs/nativeResponse",
+      "expect": "valid"
+    },
+    {
+      "file": "explicit-inability.response.json",
+      "case": "explicit-inability",
+      "target": "#/$defs/nativeResponse",
+      "expect": "valid"
+    },
+    {
+      "file": "replay-config-unavailable.request.json",
+      "case": "replay-configuration-unavailable",
+      "target": "#/$defs/replayEnvelope",
+      "expect": "valid"
+    },
+    {
+      "file": "replay-config-unavailable.response.json",
+      "case": "replay-configuration-unavailable",
+      "target": "#/$defs/rejectedResponse",
+      "expect": "valid"
+    },
+    {
+      "file": "jev-adapter-success.request.json",
+      "case": "jev-adapter-success",
+      "target": "#/$defs/jevInput",
+      "expect": "valid"
+    },
+    {
+      "file": "jev-adapter-success.result.json",
+      "case": "jev-adapter-success",
+      "target": "#/$defs/jevAdapterResult",
+      "expect": "valid"
+    },
+    {
+      "file": "jev-adapter-unmappable.result.json",
+      "case": "jev-adapter-unmappable-partial-result",
+      "target": "#/$defs/jevAdapterResult",
+      "expect": "valid"
+    },
+    {
+      "file": "invalid-noul-range.response.json",
+      "case": "invalid-noul-range",
+      "target": "#/$defs/nativeResponse",
+      "expect": "invalid"
+    },
+    {
+      "file": "invalid-confidence-field.response.json",
+      "case": "invalid-confidence-field-closure",
+      "target": "#/$defs/nativeResponse",
+      "expect": "invalid"
+    }
+  ]
+}

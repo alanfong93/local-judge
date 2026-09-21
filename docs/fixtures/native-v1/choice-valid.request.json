@@ -1,0 +1,17 @@
+{
+  "contract_version": "v1",
+  "state": { "ticket": "Customer cannot log in after the migration." },
+  "model": "qwen3:8b",
+  "policy": { "version": "support-triage-2026-09-21" },
+  "inference": { "sample_count": 1, "temperature": 0, "timeout_ms": 30000 },
+  "questions": {
+    "department": {
+      "type": "choice",
+      "instructions": "Which team should handle this ticket?",
+      "criteria": {
+        "billing": "Payments, invoices, and refunds",
+        "technical": "Bugs, outages, and integrations"
+      }
+    }
+  }
+}

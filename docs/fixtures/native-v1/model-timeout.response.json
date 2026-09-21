@@ -1,0 +1,81 @@
+{
+  "contract_version": "v1",
+  "model": "qwen3:8b",
+  "status": "completed",
+  "results": {
+    "department": {
+      "type": "choice",
+      "status": "question_error",
+      "answer": null,
+      "agreement": null,
+      "requested_samples": 1,
+      "error": {
+        "code": "MODEL_TIMEOUT",
+        "path": "",
+        "message": "the model did not answer within the per-attempt timeout"
+      },
+      "trace": {
+        "trace_id": "00000000-0000-4000-8000-000000000007",
+        "parent_trace_id": null,
+        "trace_schema_version": "v1",
+        "contract_version": "v1",
+        "prompt_template_version": "p1",
+        "output_schema_version": "o1",
+        "aggregation_version": "a1",
+        "policy_version": "support-triage-2026-09-21",
+        "accepted_request": {
+          "contract_version": "v1",
+          "state": { "ticket": "Customer cannot log in after the migration." },
+          "model": "qwen3:8b",
+          "policy": { "version": "support-triage-2026-09-21" },
+          "inference": { "sample_count": 1, "temperature": 0, "timeout_ms": 1 },
+          "questions": {
+            "department": {
+              "type": "choice",
+              "instructions": "Which team should handle this ticket?",
+              "criteria": {
+                "billing": "Payments, invoices, and refunds",
+                "technical": "Bugs, outages, and integrations"
+              }
+            }
+          }
+        },
+        "canonical_request_hash": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "state": { "ticket": "Customer cannot log in after the migration." },
+        "question": {
+          "type": "choice",
+          "instructions": "Which team should handle this ticket?",
+          "criteria": {
+            "billing": "Payments, invoices, and refunds",
+            "technical": "Bugs, outages, and integrations"
+          }
+        },
+        "criteria": { "billing": "Payments, invoices, and refunds", "technical": "Bugs, outages, and integrations" },
+        "policy_provenance": "caller-declared-unverified",
+        "rendered_messages": [
+          { "role": "system", "content": "Return exactly one option id from the supplied criteria as JSON." }
+        ],
+        "resolved_inference": { "sample_count": 1, "temperature": 0, "seed": null, "timeout_ms": 1 },
+        "backend": "ollama",
+        "model": "qwen3:8b",
+        "model_digest": null,
+        "local_runtime_version": "fixtures-0.0.0",
+        "attempts": [
+          {
+            "raw_output": "",
+            "parsed_value": null,
+            "validation_outcome": "no output: attempt exceeded the timeout",
+            "timestamp": "2026-09-22T12:05:00Z",
+            "terminal_error": {
+              "code": "MODEL_TIMEOUT",
+              "path": "",
+              "message": "the model did not answer within the per-attempt timeout"
+            }
+          }
+        ],
+        "aggregate": null
+      }
+    }
+  },
+  "error": null
+}

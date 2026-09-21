@@ -1,0 +1,126 @@
+{
+  "contract_version": "v1",
+  "model": "qwen3:8b",
+  "status": "completed",
+  "results": {
+    "is_refund": {
+      "type": "noul",
+      "status": "answered",
+      "answer": {
+        "noul": 0.86
+      },
+      "agreement": 0.6666666666666666,
+      "requested_samples": 3,
+      "error": null,
+      "trace": {
+        "trace_id": "00000000-0000-4000-8000-000000000003",
+        "parent_trace_id": null,
+        "trace_schema_version": "v1",
+        "contract_version": "v1",
+        "prompt_template_version": "p1",
+        "output_schema_version": "o1",
+        "aggregation_version": "a1",
+        "policy_version": "support-triage-2026-09-21",
+        "accepted_request": {
+          "contract_version": "v1",
+          "state": {
+            "message": "I want my money back for order 1234."
+          },
+          "model": "qwen3:8b",
+          "policy": {
+            "version": "support-triage-2026-09-21"
+          },
+          "inference": {
+            "sample_count": 3,
+            "temperature": 0,
+            "timeout_ms": 30000
+          },
+          "questions": {
+            "is_refund": {
+              "type": "noul",
+              "instructions": "Is the customer requesting a refund?",
+              "criteria": {
+                "true": "Explicitly asks for money back",
+                "false": "Does not ask for money back"
+              }
+            }
+          }
+        },
+        "canonical_request_hash": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "state": {
+          "message": "I want my money back for order 1234."
+        },
+        "question": {
+          "type": "noul",
+          "instructions": "Is the customer requesting a refund?",
+          "criteria": {
+            "true": "Explicitly asks for money back",
+            "false": "Does not ask for money back"
+          }
+        },
+        "criteria": {
+          "true": "Explicitly asks for money back",
+          "false": "Does not ask for money back"
+        },
+        "policy_provenance": "caller-declared-unverified",
+        "rendered_messages": [
+          {
+            "role": "system",
+            "content": "Return one finite number from 0 through 1 as JSON."
+          },
+          {
+            "role": "user",
+            "content": {
+              "instructions": "Is the customer requesting a refund?",
+              "criteria": {
+                "true": "Explicitly asks for money back",
+                "false": "Does not ask for money back"
+              },
+              "state": {
+                "message": "I want my money back for order 1234."
+              }
+            }
+          }
+        ],
+        "resolved_inference": {
+          "sample_count": 3,
+          "temperature": 0,
+          "seed": null,
+          "timeout_ms": 30000
+        },
+        "backend": "ollama",
+        "model": "qwen3:8b",
+        "model_digest": null,
+        "local_runtime_version": "fixtures-0.0.0",
+        "attempts": [
+          {
+            "raw_output": "0.82",
+            "parsed_value": 0.82,
+            "validation_outcome": "valid",
+            "timestamp": "2026-09-22T12:02:00Z",
+            "terminal_error": null
+          },
+          {
+            "raw_output": "0.95",
+            "parsed_value": 0.95,
+            "validation_outcome": "valid",
+            "timestamp": "2026-09-22T12:02:01Z",
+            "terminal_error": null
+          },
+          {
+            "raw_output": "0.81",
+            "parsed_value": 0.81,
+            "validation_outcome": "valid",
+            "timestamp": "2026-09-22T12:02:02Z",
+            "terminal_error": null
+          }
+        ],
+        "aggregate": {
+          "noul": 0.86
+        }
+      },
+      "confidence": 0.9
+    }
+  },
+  "error": null
+}

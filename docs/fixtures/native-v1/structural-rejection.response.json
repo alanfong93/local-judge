@@ -1,0 +1,11 @@
+{
+  "contract_version": "v1",
+  "model": "qwen3:8b",
+  "status": "rejected",
+  "results": {},
+  "error": {
+    "code": "UNKNOWN_FIELD",
+    "path": "/temperature",
+    "message": "unknown top-level field: the envelope is closed"
+  }
+}
