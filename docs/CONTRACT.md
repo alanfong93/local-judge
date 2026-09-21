@@ -308,9 +308,11 @@ these fields:
 
 Choice `answer` is `{ "choice": string, "vote_share": map<string, number> }`.
 Score `answer` is `{ "score": number, "legend": map<string, JSONContent>,
-"vote_share": map<string, number> }`. Score map keys are the decimal strings
+"vote_share": map<string, number> }`. Score map keys for both `legend` and
+`vote_share` are the decimal strings
 `"0"` through `"criteria.length - 1"`, matching the zero-based criterion
-positions. Noul `answer` is `{ "noul": number }`.
+positions, and each `legend` value is the criterion `JSONContent` at that
+position. Noul `answer` is `{ "noul": number }`.
 
 `INVALID_QUESTION` is a `question_error` with the parsed type when available,
 otherwise type null. `INVALID_MODEL_OUTPUT`, `MODEL_TIMEOUT`,
