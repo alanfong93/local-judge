@@ -40,6 +40,17 @@ def serve(app: FastAPI, host: str = DEFAULT_HOST, port: int = DEFAULT_PORT) -> N
     uvicorn.run(app, host=host, port=port)
 
 
+def _load_stage1_defs() -> dict | None:
+    """Best-effort load of the Stage 1 $defs from the repository checkout."""
+    from pathlib import Path
+
+    schema_path = Path(__file__).resolve().parents[2] / "docs" / "schemas" / "native-v1.schema.json"
+    try:
+        return json.loads(schema_path.read_text(encoding="utf-8"))["$defs"]
+    except (OSError, ValueError, KeyError):
+        return None
+
+
 def create_app(
     native_evaluator: Handler,
     replay_evaluator: Handler | None = None,
@@ -53,8 +64,12 @@ def create_app(
     time for partial deployments; its route answers 503 until provided.
 
     stage1_defs, when supplied, are the Stage 1 schema $defs embedded into the
-    generated OpenAPI document's components (docs/API_Reference.md).
+    generated OpenAPI document's components (docs/API_Reference.md). By default
+    they are loaded from the repository's docs/schemas/native-v1.schema.json so
+    the generated document always references the Stage 1 definitions.
     """
+    if stage1_defs is None:
+        stage1_defs = _load_stage1_defs()
     app = FastAPI(
         title="local-judge",
         description="Local native v1 evaluation, replay, and Jev adapter routes.",

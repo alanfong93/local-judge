@@ -173,3 +173,14 @@ def test_real_core_integration_native_rejection_end_to_end():
     oversize = client.post("/v1/evaluations", content=b'{"state": "' + b"x" * (256 * 1024) + b'"}')
     assert oversize.status_code == 413
     assert oversize.json()["error"]["code"] == "REQUEST_TOO_LARGE"
+
+
+def test_default_app_embeds_stage1_components():
+    """Without an explicit stage1_defs, the default app still embeds Stage 1 defs."""
+    from local_judge.api import create_app as ca
+
+    app = ca(native_evaluator=lambda raw: (200, {}))
+    client = TestClient(app)
+    document = client.get("/openapi.json").json()
+    assert "native-v1" in document["components"]["schemas"]
+    assert document["components"]["schemas"]["native-v1"]["$defs"]["requestEnvelope"]
