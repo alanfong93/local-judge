@@ -92,3 +92,23 @@ def test_explicit_inability_gives_inability_to_answer():
     result = e.run("severity", {"type": "score", "criteria": RUBRIC}, "s", attempts)
     assert result.status is ResultStatus.INABILITY_TO_ANSWER
     assert result.error.code == "INSUFFICIENT_EVIDENCE"
+
+
+def test_empty_attempts_give_question_error_without_crashing():
+    e = executor()
+    result = e.run("severity", {"type": "score", "criteria": RUBRIC}, "s", [])
+    assert result.status is ResultStatus.QUESTION_ERROR
+    assert result.answer is None
+    assert result.requested_samples == 0 or result.error is not None
+
+
+def test_rubric_bounds_validated_at_construction():
+    with pytest.raises(ValueError):
+        ScoreExecutor(criteria=["only-one"])
+    with pytest.raises(ValueError):
+        ScoreExecutor(criteria=[f"lvl{i}" for i in range(11)])
+
+
+def test_non_jsoncontent_rubric_values_rejected_at_construction():
+    with pytest.raises(ValueError):
+        ScoreExecutor(criteria=["ok", None])

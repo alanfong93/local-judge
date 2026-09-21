@@ -146,6 +146,14 @@ class NativeTypeExecutor:
 
     def run(self, question_id: str, question: Mapping[str, Any], state: Any, attempts) -> ResultEntry:
         records = tuple(attempts)
+        if not records:
+            return self._result(
+                question, records, ResultStatus.QUESTION_ERROR,
+                error=ErrorObject(
+                    code="INVALID_QUESTION", path="", message="no attempts were recorded for this question"
+                ),
+                answer=None, agreement=None,
+            )
         aggregate_samples = []
         for record in records:
             if record.terminal_error is None:

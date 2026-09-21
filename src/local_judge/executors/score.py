@@ -10,9 +10,14 @@ from local_judge.executors.base import NativeTypeExecutor
 
 class ScoreExecutor(NativeTypeExecutor):
     def __init__(self, criteria) -> None:
+        rubric = list(criteria) if criteria is not None else []
+        if not 2 <= len(rubric) <= 10:
+            raise ValueError("score criteria must be an ordered array of 2 through 10 values")
+        if any(item is None or not isinstance(item, (str, list, dict)) for item in rubric):
+            raise ValueError("score criteria values must be JSONContent")
         super().__init__(
             question_type="score",
-            criteria=criteria,
+            criteria=rubric,
             aggregate=self.aggregate_from_parsed,
         )
 
