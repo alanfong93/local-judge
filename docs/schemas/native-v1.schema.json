@@ -204,7 +204,7 @@
                 "UNSUPPORTED_LOCAL_MODEL"
               ]
             },
-            "path": { "type": "string", "pattern": "^(/([^/~]|~[01])+)+$" }
+            "path": { "type": "string", "pattern": "^(?:/(?:[^/~]|~[01])*)+$" }
           }
         }
       ]
