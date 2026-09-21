@@ -71,6 +71,10 @@ def canonical_json(value) -> str:
         for key in value:
             if not isinstance(key, str):
                 raise ValueError("object keys must be strings for canonical JSON")
+            try:
+                key.encode("utf-8")
+            except UnicodeEncodeError as exc:
+                raise ValueError("object key contains unpaired surrogates and is not valid Unicode") from exc
         # RFC 8785 sorts property names by UTF-16 code units.
         items = []
         for key in sorted(value, key=lambda k: k.encode("utf-16be", "surrogatepass")):

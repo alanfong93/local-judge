@@ -501,3 +501,14 @@ def test_mid_sampling_port_failure_preserves_earlier_samples():
     assert len(trace.attempts) == 1, "sample-1 evidence must survive the sample-2 failure"
     assert trace.attempts[0].raw_output == "first"
     assert results["q"].status is ResultStatus.QUESTION_ERROR
+
+
+def test_lone_surrogate_object_keys_are_rejected():
+    import pytest
+
+    from local_judge.canonical import canonical_json as cj
+
+    with pytest.raises(ValueError):
+        cj({"\ud800": 1})
+    with pytest.raises(ValueError):
+        canonical_request_hash({"\udfff": "v"})
