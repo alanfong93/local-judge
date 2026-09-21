@@ -52,6 +52,87 @@ def _require_resolved_inference(d):
     if set(d) != {"sample_count", "temperature", "seed", "timeout_ms"}:
         raise ValueError("resolved_inference must be the closed resolved settings object")
 
+
+def _validate_choice_answer(answer):
+    if not isinstance(answer, Mapping) or set(answer) != {"choice", "vote_share"}:
+        raise ValueError("choice answer must be a closed object with choice and vote_share")
+    if not isinstance(answer["choice"], str) or not answer["choice"]:
+        raise ValueError("choice answer.choice must be a nonempty string")
+    _validate_vote_share(answer["vote_share"])
+
+
+def _validate_vote_share(vote_share):
+    if not isinstance(vote_share, Mapping) or len(vote_share) < 1:
+        raise ValueError("vote_share must be a nonempty object")
+    for key, value in vote_share.items():
+        if not _is_number(value) or not 0 <= value <= 1:
+            raise ValueError("vote_share values must be numbers from 0 through 1")
+
+
+def _validate_score_answer(answer):
+    if not isinstance(answer, Mapping) or set(answer) != {"score", "legend", "vote_share"}:
+        raise ValueError("score answer must be a closed object with score, legend, and vote_share")
+    if not _is_number(answer["score"]) or not 0 <= answer["score"] <= 9:
+        raise ValueError("score answer.score must be a number from 0 through 9")
+    for keyed in ("legend", "vote_share"):
+        m = answer[keyed]
+        if not isinstance(m, Mapping):
+            raise ValueError(f"score answer.{keyed} must be an object")
+        for key, value in m.items():
+            if not re.fullmatch(r"[0-9]", key):
+                raise ValueError(f"score answer.{keyed} keys must be single decimal digits")
+            if keyed == "legend":
+                if value is not None and not isinstance(value, (str, list, dict)):
+                    raise ValueError("score answer.legend values must be JSONContent")
+            elif not _is_number(value) or not 0 <= value <= 1:
+                raise ValueError("score answer.vote_share values must be numbers from 0 through 1")
+
+
+def _validate_noul_answer(answer):
+    if not isinstance(answer, Mapping) or set(answer) != {"noul"}:
+        raise ValueError("noul answer must be a closed object with noul")
+    if not _is_number(answer["noul"]) or not 0 <= answer["noul"] <= 1:
+        raise ValueError("noul answer.noul must be a number from 0 through 1")
+
+
+def _validate_typed_answer(type_, answer):
+    if type_ == "choice":
+        _validate_choice_answer(answer)
+    elif type_ == "score":
+        _validate_score_answer(answer)
+    elif type_ == "noul":
+        _validate_noul_answer(answer)
+    else:
+        raise ValueError(f"unknown question type: {type_!r}")
+
+
+def _validate_answer_by_keys(answer):
+    """Trace aggregates carry no type tag; the closed key set identifies the answer."""
+    if not isinstance(answer, Mapping):
+        raise ValueError("aggregate must be an answer object or null")
+    keys = set(answer)
+    if "choice" in keys or "noul" in keys or "score" in keys:
+        if keys == {"noul"}:
+            _validate_noul_answer(answer)
+        elif keys == {"score", "legend", "vote_share"}:
+            _validate_score_answer(answer)
+        elif keys == {"choice", "vote_share"}:
+            _validate_choice_answer(answer)
+        else:
+            raise ValueError(f"aggregate does not match any closed answer shape: {sorted(keys)}")
+    else:
+        raise ValueError(f"aggregate does not match any closed answer shape: {sorted(keys)}")
+
+
+def _validate_rendered_messages(messages):
+    for message in messages:
+        if not isinstance(message, Mapping) or set(message) != {"role", "content"}:
+            raise ValueError("rendered messages must be closed objects with role and content")
+        if not isinstance(message["role"], str) or not message["role"]:
+            raise ValueError("rendered message role must be a nonempty string")
+        if message["content"] is not None and not isinstance(message["content"], (str, list, dict)):
+            raise ValueError("rendered message content must be JSONContent")
+
 _RESULT_KEYS = frozenset(
     {"type", "status", "answer", "agreement", "requested_samples", "error", "trace"}
 )
@@ -233,6 +314,9 @@ class TraceRecord:
             raise ValueError("trace criteria must be JSONContent or null")
         if not isinstance(self.rendered_messages, list):
             raise ValueError("trace rendered_messages must be a list")
+        _validate_rendered_messages(self.rendered_messages)
+        if self.aggregate is not None:
+            _validate_answer_by_keys(self.aggregate)
         if not isinstance(self.resolved_inference, Mapping):
             raise ValueError("trace resolved_inference must be the resolved settings object")
         _require_resolved_inference(self.resolved_inference)
@@ -334,6 +418,7 @@ class ResultEntry:
                 raise ValueError("answered results carry no error")
             if self.type_ is None:
                 raise ValueError("answered results know their type")
+            _validate_typed_answer(self.type_, self.answer)
             if self.requested_samples == 1:
                 if self.agreement is not None:
                     raise ValueError("agreement is null when one sample was requested")

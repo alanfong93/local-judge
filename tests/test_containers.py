@@ -93,3 +93,21 @@ def test_non_answered_results_reject_wrong_error_class():
     fixture = load_fixture("choice-tie.response.json")["results"]["priority"]
     with pytest.raises(ValueError):
         ResultEntry.from_dict({**fixture, "error": {"code": "INVALID_QUESTION", "path": "", "message": "m"}})
+
+
+def test_answer_shape_must_match_type():
+    import pytest
+
+    valid = load_fixture("choice-valid.response.json")["results"]["department"]
+    with pytest.raises(ValueError):
+        ResultEntry.from_dict({**valid, "answer": {"noul": 0.5}})
+    score_entry = load_fixture("score-fractional.response.json")["results"]["severity"]
+    bad_vote_share = {**score_entry, "answer": {"score": 1.5, "legend": {"0": "x"}, "vote_share": 2}}
+    with pytest.raises(ValueError):
+        ResultEntry.from_dict(bad_vote_share)
+    bad_trace = load_fixture("score-fractional.response.json")["results"]["severity"]["trace"]
+    with pytest.raises(ValueError):
+        TraceRecord.from_dict({**bad_trace, "aggregate": {"noul": 0.5}})
+    bad_messages = load_fixture("choice-valid.response.json")["results"]["department"]["trace"]
+    with pytest.raises(ValueError):
+        TraceRecord.from_dict({**bad_messages, "rendered_messages": [{"role": "", "content": "x"}]})

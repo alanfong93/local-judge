@@ -52,9 +52,14 @@ def _escape(token: str) -> str:
 
 
 def _pairs_hook(pairs: list[tuple[str, Any]]) -> _DupDict:
-    keys = [k for k, _ in pairs]
     d = _DupDict(pairs)
-    d.dups = frozenset(k for k in keys if keys.count(k) > 1)
+    seen: set[str] = set()
+    dups: set[str] = set()
+    for key, _ in pairs:
+        if key in seen:
+            dups.add(key)
+        seen.add(key)
+    d.dups = frozenset(dups)
     return d
 
 
@@ -90,6 +95,11 @@ class RequestValidator:
                 ) from None
         elif isinstance(raw, str):
             raw = raw.encode("utf-8")
+        if len(raw) > MAX_ENCODED_BYTES:
+            raise StructuralError(
+                StructuralCode.REQUEST_TOO_LARGE,
+                "the encoded request exceeds 256 KiB",
+            )
         try:
             doc = json.loads(
                 raw,
@@ -101,11 +111,6 @@ class RequestValidator:
             raise StructuralError(
                 StructuralCode.MALFORMED_JSON, "the raw request cannot be decoded as one JSON value"
             ) from None
-        if len(raw) > MAX_ENCODED_BYTES:
-            raise StructuralError(
-                StructuralCode.REQUEST_TOO_LARGE,
-                "the encoded request exceeds 256 KiB",
-            )
         if not isinstance(doc, _DupDict):
             raise StructuralError(
                 StructuralCode.MALFORMED_JSON, "the request body must be one JSON object"

@@ -210,3 +210,9 @@ def test_rejection_response_container_matches_published_schema():
 def test_non_object_request_body_is_malformed():
     expect_rejection("[1, 2, 3]", StructuralCode.MALFORMED_JSON, "")
 
+
+
+def test_oversize_is_rejected_before_parsing():
+    """The encoded-size cap fires on the bytes, even when the body is also malformed."""
+    expect_rejection('{"state": "x" * 1', StructuralCode.REQUEST_TOO_LARGE, "").message
+    expect_rejection('{"state": "' + "x" * (256 * 1024) + '"}', StructuralCode.REQUEST_TOO_LARGE, "")
