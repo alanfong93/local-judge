@@ -5,12 +5,16 @@ ordered rubric (docs/CONTRACT.md 'Score' and 'Results and Aggregation'). A
 tied mode remains answered because the expected position is defined.
 """
 
+from typing import Mapping
+
 from local_judge.executors.base import NativeTypeExecutor
 
 
 class ScoreExecutor(NativeTypeExecutor):
     def __init__(self, criteria) -> None:
-        rubric = list(criteria) if criteria is not None else []
+        if isinstance(criteria, (str, Mapping)) or criteria is None:
+            raise ValueError("score criteria must be an ordered array of 2 through 10 values")
+        rubric = list(criteria)
         if not 2 <= len(rubric) <= 10:
             raise ValueError("score criteria must be an ordered array of 2 through 10 values")
         if any(item is None or not isinstance(item, (str, list, dict)) for item in rubric):
