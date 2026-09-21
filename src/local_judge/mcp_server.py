@@ -93,7 +93,7 @@ def build_default_server(model_profiles=None):
         return 409, unavailable.to_dict()
 
     def jev(raw):
-        return adapter.evaluate(json.loads(raw.decode("utf-8")), None)
+        return 400, adapter.evaluate(json.loads(raw.decode("utf-8")), None)
 
     return create_mcp_server(
         native_evaluator=native,

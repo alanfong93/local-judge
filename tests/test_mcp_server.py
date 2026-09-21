@@ -157,3 +157,25 @@ def test_main_builds_a_fail_closed_stdio_server():
     assert parsed["status"] == "rejected"
     assert parsed["error"]["code"] == "UNSUPPORTED_LOCAL_MODEL"
     assert callable(main)
+
+
+def test_default_jev_tool_refuses_unsupported_model():
+    from local_judge.mcp_server import build_default_server
+
+    server = build_default_server()
+    body = call_tool(server, "local_judge_evaluate_jev",
+                     {"request": {"state": "s", "model": "qwen3:8b",
+                                  "questions": {"q": {"type": "noul", "instructions": "i"}}}})
+    parsed = json.loads(body)
+    assert parsed["answers"] is None and parsed["local_judge"] is None
+    assert parsed["error"]["code"] == "UNSUPPORTED_LOCAL_MODEL"
+
+
+def test_default_replay_tool_refuses_without_artifacts():
+    from local_judge.mcp_server import build_default_server
+
+    server = build_default_server()
+    body = call_tool(server, "local_judge_replay",
+                     {"request": {"contract_version": "v1", "trace": {"trace_id": "x"}}})
+    parsed = json.loads(body)
+    assert parsed["error"]["code"] == "REPLAY_CONFIGURATION_UNAVAILABLE"
