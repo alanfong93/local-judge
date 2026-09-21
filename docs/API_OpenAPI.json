@@ -1,0 +1,70 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "local-judge",
+    "description": "Local native v1 evaluation, replay, and Jev adapter routes.",
+    "version": "v1"
+  },
+  "paths": {
+    "/v1/evaluations": {
+      "post": {
+        "summary": "Evaluations",
+        "operationId": "evaluations_v1_evaluations_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Evaluations V1 Evaluations Post"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/replays": {
+      "post": {
+        "summary": "Replays",
+        "operationId": "replays_v1_replays_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Replays V1 Replays Post"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/jev/evaluations": {
+      "post": {
+        "summary": "Jev Evaluations",
+        "operationId": "jev_evaluations_v1_jev_evaluations_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Jev Evaluations V1 Jev Evaluations Post"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
