@@ -186,23 +186,27 @@ class UrllibOllamaTransport:
         def _remaining_seconds() -> float:
             return deadline - time.monotonic()
 
+        def _set_remaining_timeout(handle_like, remaining: float) -> None:
+            # HTTPResponse -> .fp (buffered reader) -> .raw (SocketIO) -> ._sock (socket)
+            sock = getattr(getattr(getattr(handle_like, "fp", None), "raw", None), "_sock", None)
+            if sock is None:
+                return
+            try:
+                sock.settimeout(max(remaining, 0.001))
+            except (AttributeError, OSError):
+                pass
+
         try:
             handle = self._opener.open(request, timeout=timeout_ms / 1000)
             with handle:
                 # Enforce the deadline DURING reads, not just between them: each
                 # socket operation gets the remaining budget as its timeout.
-                sock = getattr(getattr(handle, "fp", None), "raw", None)
-                sock = getattr(sock, "_sock", None)
                 chunks = []
                 while True:
                     remaining = deadline - time.monotonic()
                     if remaining <= 0:
                         raise OllamaTransportTimeout("attempt deadline exceeded")
-                    if sock is not None:
-                        try:
-                            sock.settimeout(remaining)
-                        except (AttributeError, OSError):
-                            sock = None  # soft bound only if internals are unavailable
+                    _set_remaining_timeout(handle, remaining)
                     chunk = handle.read(65536)
                     if not chunk:
                         break
@@ -210,8 +214,9 @@ class UrllibOllamaTransport:
                 body = b"".join(chunks).decode("utf-8", "replace")
             return TransportResponse(status_code=handle.status, body=body)
         except urllib.error.HTTPError as exc:
-            # The error body is inessential: one bounded read (the response's
-            # own socket timeout bounds it), any failure yields an empty body.
+            # The error body is inessential: one read bounded by the remaining
+            # attempt budget (socket timeout); any failure yields an empty body.
+            _set_remaining_timeout(exc, _remaining_seconds())
             try:
                 body = exc.read(65536).decode("utf-8", "replace")
             except Exception:

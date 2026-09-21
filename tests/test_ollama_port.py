@@ -174,7 +174,6 @@ def test_real_transport_maps_oserrors_timeouts_and_redirects():
     """Opener-injected probes: expected failure shapes never escape as exceptions."""
     import http.client
     import urllib.error
-    import urllib.request
 
     from local_judge.ollama import UrllibOllamaTransport as T
 
@@ -335,15 +334,50 @@ def test_http_error_body_read_is_bounded_by_the_deadline():
             time.sleep(0.05)  # drip: must be cut by the remaining-budget timeout
             return b"err"
 
+    timeouts = []
+
+    class FakeSocket:
+        def settimeout(self, value):
+            timeouts.append(value)
+
+    class FakeRaw:
+        def __init__(self, sock):
+            self._sock = sock
+
+    class FakeFP:
+        def __init__(self, sock):
+            self.raw = FakeRaw(sock)
+
+    fake_socket = FakeSocket()
+    slow_error = SlowErrorOpener()
+    transport = UrllibOllamaTransport(opener=slow_error)
+
+    # give the raised HTTPError a real-looking fp chain so the port's
+    # remaining-budget settimeout is exercised, not just tolerated
+    original_open = slow_error.open
+
+    def open_with_socket_chain(request, timeout=None):
+        started = time.monotonic()
+        time.sleep(0.05)
+        try:
+            original_open(request, timeout)
+        except urllib.error.HTTPError as exc:
+            exc.fp = FakeFP(fake_socket)
+            raise
+        raise AssertionError("expected HTTPError")
+
+    slow_error.open = open_with_socket_chain
+
     profiles = {
         "qwen3:8b": OllamaProfile(
             name="qwen3:8b", supported_inference_settings=frozenset({"sample_count", "temperature", "timeout_ms"})
         )
     }
     started = time.monotonic()
-    attempt = OllamaModelPort(profiles, UrllibOllamaTransport(opener=SlowErrorOpener())).attempt(
-        "qwen3:8b", MESSAGES, Inference()
+    attempt = OllamaModelPort(profiles, transport).attempt(
+        "qwen3:8b", MESSAGES, Inference(timeout_ms=80)
     )
     # the 404 body read is bounded and cannot raise: UNAVAILABLE, well under the budget
     assert attempt.outcome is TransportOutcome.UNAVAILABLE
     assert time.monotonic() - started < 0.3
+    assert timeouts and all(0 < t <= 0.08 for t in timeouts)
