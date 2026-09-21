@@ -82,6 +82,7 @@ def test_invalid_sample_gives_question_error_and_no_partial_aggregate():
     attempts = [e.classify_sample(ok("9"))]
     result = e.run("severity", {"type": "score", "criteria": RUBRIC}, "s", attempts)
     assert result.status is ResultStatus.QUESTION_ERROR
+    assert result.error is not None
     assert result.error.code == "INVALID_MODEL_OUTPUT"
     assert result.answer is None
 

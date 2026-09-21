@@ -92,6 +92,10 @@ class NativeTypeExecutor:
         )
         return compiler.render("validation", question, None)[1]
 
+    def classify(self, raw_attempt: RawAttempt) -> AttemptRecord:
+        """S2-3 SamplingTypeExecutor seam: route through local revalidation."""
+        return self.classify_sample(raw_attempt)
+
     def classify_sample(self, raw: RawAttempt, question: Mapping[str, Any] | None = None) -> AttemptRecord:
         if raw.outcome is not TransportOutcome.OK:
             code = _TRANSPORT_TERMINAL.get(raw.outcome.value)
