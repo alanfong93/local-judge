@@ -26,3 +26,5 @@ The local stdio FastMCP server exposes three thin tools:
 
 Tool-level execution errors are reserved for server startup or protocol failure.
 Contract validation and model outcomes are returned as typed result objects.
+Each tool receives the request wrapped as `{"request": <request object>}` and
+returns the typed result object as JSON text.
