@@ -36,7 +36,11 @@ def _answer_matches(case_result, case):
     results = case_result.get("results", {})
     expected = case.get("expected_answer") or {}
     allowed = case.get("allowed_answers") or {}
-    for qid, entry in results.items():
+    # every expected/allowed question id must be present in the results
+    for qid in set(expected) | set(allowed):
+        if qid not in results:
+            return False
+        entry = results[qid]
         answer = entry.get("answer")
         if qid in expected and answer != expected[qid]:
             return False
@@ -79,7 +83,10 @@ def run_corpus(cases: list, face, thresholds: Mapping | None = None) -> dict:
 
     evaluated = []
     for case in cases:
-        evaluated.append({"case": case, "result": face(case)})
+        result = face(case)
+        if not isinstance(result, dict):
+            result = {"status": "rejected", "results": {}, "error": {"code": "MALFORMED_JSON", "path": "", "message": "face returned a non-object"}}
+        evaluated.append({"case": case, "result": result})
 
     normal = [e for e in evaluated if e["case"].get("case_class") == "normal"]
     ambiguous = [e for e in evaluated if e["case"].get("case_class") == "ambiguous"]
@@ -116,8 +123,10 @@ def run_corpus(cases: list, face, thresholds: Mapping | None = None) -> dict:
     # error rates over the normal class
     invalid_output = backend_error = 0
     inability = 0
+    normal_question_entries = 0
     for e in normal:
         for r in e["result"].get("results", {}).values():
+            normal_question_entries += 1
             code = (r.get("error") or {}).get("code")
             if r.get("status") == "question_error":
                 if code == "INVALID_MODEL_OUTPUT":
@@ -245,15 +254,30 @@ def run_corpus(cases: list, face, thresholds: Mapping | None = None) -> dict:
             "excluded_unanswered_twin": excluded_unanswered_twin,
         },
     })
+    matched_by_relation = {}
+    for e in metamorphic:
+        base_id = e["case"].get("matched_case_id")
+        if base_id in normal_results or any(
+            x["case"].get("case_id") == base_id for x in evaluated
+        ):
+            relation = e["case"].get("metamorphic_relation")
+            matched_by_relation[relation] = matched_by_relation.get(relation, 0) + 1
     metamorphic_ok = bool(invariance) and all(
-        value is not None and value >= t["metamorphic_min_invariance"]
-        and _relation_pairs(metamorphic, relation) >= t["metamorphic_min_pairs_per_relation"]
+        value is not None
+        and value >= t["metamorphic_min_invariance"]
+        and matched_by_relation.get(relation, 0) >= t["metamorphic_min_pairs_per_relation"]
         for relation, value in invariance.items()
-    ) and bool(invariance)
+    )
     gates.append({
         "gate": "metamorphic_invariance",
         "pass": metamorphic_ok,
-        "detail": {"relations": invariance, "min_pairs_per_relation": t["metamorphic_min_pairs_per_relation"]},
+        "detail": {
+            "relations": invariance,
+            "matched_pairs_per_relation": {
+                relation: matched_by_relation.get(relation, 0) for relation in invariance
+            },
+            "min_pairs_per_relation": t["metamorphic_min_pairs_per_relation"],
+        },
     })
 
     demonstrated = all(gate["pass"] for gate in gates)
@@ -261,6 +285,7 @@ def run_corpus(cases: list, face, thresholds: Mapping | None = None) -> dict:
     return {
         "gates": gates,
         "demonstrated_usefulness": demonstrated,
+        "effective_thresholds": dict(t),
         "metrics": {
             "answer_coverage": {"value": answer_coverage, "answered": answered, "submitted": len(normal)},
             "accuracy": {"value": accuracy, "correct": correct, "answered": answered},
@@ -277,19 +302,19 @@ def run_corpus(cases: list, face, thresholds: Mapping | None = None) -> dict:
             "invariance": invariance,
             "agreement_distribution": agreement_distribution,
             "invalid_output_rate": {
-                "value": _ratio(invalid_output, len(normal)),
+                "value": _ratio(invalid_output, normal_question_entries),
                 "count": invalid_output,
-                "submitted": len(normal),
+                "question_entries": normal_question_entries,
             },
             "inability_rate": {
-                "value": _ratio(inability, len(normal)),
+                "value": _ratio(inability, normal_question_entries),
                 "count": inability,
-                "submitted": len(normal),
+                "question_entries": normal_question_entries,
             },
             "backend_error_rate": {
-                "value": _ratio(backend_error, len(normal)),
+                "value": _ratio(backend_error, normal_question_entries),
                 "count": backend_error,
-                "submitted": len(normal),
+                "question_entries": normal_question_entries,
             },
         },
         "ambiguous_inability": {"count": ambiguous_inability, "cases": len(ambiguous)},
@@ -301,5 +326,3 @@ def run_corpus(cases: list, face, thresholds: Mapping | None = None) -> dict:
     }
 
 
-def _relation_pairs(metamorphic, relation) -> int:
-    return sum(1 for e in metamorphic if e["case"].get("metamorphic_relation") == relation)
