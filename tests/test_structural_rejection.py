@@ -214,5 +214,9 @@ def test_non_object_request_body_is_malformed():
 
 def test_oversize_is_rejected_before_parsing():
     """The encoded-size cap fires on the bytes, even when the body is also malformed."""
-    expect_rejection('{"state": "x" * 1', StructuralCode.REQUEST_TOO_LARGE, "").message
+    expect_rejection(
+        '{"state": "' + "x" * (256 * 1024),  # over the cap AND not valid JSON (unterminated)
+        StructuralCode.REQUEST_TOO_LARGE,
+        "",
+    )
     expect_rejection('{"state": "' + "x" * (256 * 1024) + '"}', StructuralCode.REQUEST_TOO_LARGE, "")

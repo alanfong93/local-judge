@@ -107,7 +107,7 @@ def test_answer_shape_must_match_type():
         ResultEntry.from_dict(bad_vote_share)
     bad_trace = load_fixture("score-fractional.response.json")["results"]["severity"]["trace"]
     with pytest.raises(ValueError):
-        TraceRecord.from_dict({**bad_trace, "aggregate": {"noul": 0.5}})
+        TraceRecord.from_dict({**bad_trace, "aggregate": {"bogus": 1}})
     bad_messages = load_fixture("choice-valid.response.json")["results"]["department"]["trace"]
     with pytest.raises(ValueError):
         TraceRecord.from_dict({**bad_messages, "rendered_messages": [{"role": "", "content": "x"}]})
