@@ -85,21 +85,20 @@ class SamplingOrchestrator:
     def run_question(self, envelope: RequestEnvelope, question_id: str, question: Mapping[str, Any]) -> ResultEntry:
         accepted_request = self._accepted_request(envelope)
         rendered_messages: list = []
-        attempt_records: tuple = ()
+        attempt_records: list = []
         try:
             messages = self._executor.render_messages(question_id, question, envelope.state)
             rendered_messages = list(messages)
-            raw_attempts: list[RawAttempt] = []
+            attempt_records: list[AttemptRecord] = []
             for _ in range(envelope.inference.sample_count):
-                raw_attempts.append(
-                    self._port.attempt(
-                        envelope.model,
-                        messages,
-                        envelope.inference,
-                    )
+                raw = self._port.attempt(
+                    envelope.model,
+                    messages,
+                    envelope.inference,
                 )
-            attempt_records = tuple(self._executor.classify(raw) for raw in raw_attempts)
-            result = self._executor.run(question_id, question, envelope.state, attempt_records)
+                # incremental: evidence from earlier samples survives later failures
+                attempt_records.append(self._executor.classify(raw))
+            result = self._executor.run(question_id, question, envelope.state, tuple(attempt_records))
         except Exception as exc:  # isolation: one question never aborts its siblings
             return self._question_error_fallback(
                 envelope, question_id, question, accepted_request, exc,

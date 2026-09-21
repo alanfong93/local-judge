@@ -2,15 +2,15 @@
 
 Number serialization follows ECMAScript number-to-string (RFC 8785's normative
 rule) for the finite double space: shortest round-trip digits with ES6
-notation thresholds. Object keys are sorted; strings use minimal JSON
-escaping with non-ASCII characters kept as UTF-8.
+notation thresholds. Object keys are sorted by UTF-16 code units; strings use
+minimal JSON escaping with non-ASCII characters kept as UTF-8. Every number
+is an IEEE-754 double (I-JSON), and strings containing unpaired surrogates are
+rejected as invalid Unicode.
 """
 
 import hashlib
 import json
 import math
-
-_EMPTY_STRING_CODE = "0"
 
 
 def _es6_number(value: float) -> str:
@@ -54,16 +54,21 @@ def canonical_json(value) -> str:
     if value is None:
         return "null"
     if isinstance(value, int):
-        return str(value)
+        # I-JSON/RFC 8785: every JSON number is an IEEE-754 double; integers
+        # beyond 2**53 lose precision exactly as any conforming consumer sees.
+        return _es6_number(float(value))
     if isinstance(value, float):
         return _es6_number(value)
     if isinstance(value, str):
+        try:
+            value.encode("utf-8")
+        except UnicodeEncodeError as exc:
+            raise ValueError("string contains unpaired surrogates and is not valid Unicode") from exc
         return json.dumps(value, ensure_ascii=False)
     if isinstance(value, list):
         return "[" + ",".join(canonical_json(item) for item in value) + "]"
     if isinstance(value, dict):
         for key in value:
-            # validate before sorting: the sort key function assumes str keys
             if not isinstance(key, str):
                 raise ValueError("object keys must be strings for canonical JSON")
         # RFC 8785 sorts property names by UTF-16 code units.

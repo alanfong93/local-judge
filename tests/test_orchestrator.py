@@ -15,6 +15,9 @@ from local_judge import (
     AttemptRecord,
     ErrorObject,
     Inference,
+    RequestValidator,
+    StructuralCode,
+    StructuralError,
     ResultEntry,
     Policy,
     QuestionEntry,
@@ -446,3 +449,55 @@ def test_non_string_object_keys_are_rejected():
     with pytest.raises(ValueError):
         canonical_json({1: "a"})
 
+
+
+def test_big_integers_follow_double_semantics():
+    from local_judge.canonical import canonical_json as cj
+
+    assert cj(9007199254740993) == "9007199254740992"
+    assert cj(1) == "1"
+
+
+def test_lone_surrogates_are_invalid_unicode():
+    import pytest
+
+    from local_judge.canonical import canonical_json as cj
+
+    with pytest.raises(ValueError):
+        cj("\ud800")
+    with pytest.raises(ValueError):
+        canonical_request_hash({"state": "\udfff"})
+
+
+def test_lone_surrogate_request_is_structurally_rejected():
+    from conftest import TEST_PROFILE_SUPPORTED
+    from local_judge import RequestValidator, StructuralCode
+
+    raw = (
+        '{"contract_version": "v1", "state": "\ud800", "model": "qwen3:8b",'
+        ' "policy": {"version": "p"}, "inference": {},'
+        ' "questions": {"q": {"type": "noul", "instructions": "i"}}}'
+    )
+    with pytest.raises(StructuralError) as excinfo:
+        RequestValidator({"qwen3:8b": TEST_PROFILE_SUPPORTED}).parse(raw)
+    assert excinfo.value.error.code == StructuralCode.MALFORMED_JSON
+
+
+def test_mid_sampling_port_failure_preserves_earlier_samples():
+    class FlakyPort:
+        def __init__(self):
+            self.calls = 0
+
+        def attempt(self, model, rendered_messages, inference, response_schema=None):
+            self.calls += 1
+            if self.calls == 1:
+                return RawAttempt(outcome=TransportOutcome.OK, output="first")
+            raise RuntimeError("transport exploded mid-sampling")
+
+    executor = FakeExecutor()
+    orch = SamplingOrchestrator(port=FlakyPort(), executor=executor, versions=versions(), backend="fake")
+    results = orch.run_questions(envelope(sample_count=2, questions={"q": {"type": "noul", "instructions": "i"}}))
+    trace = results["q"].trace
+    assert len(trace.attempts) == 1, "sample-1 evidence must survive the sample-2 failure"
+    assert trace.attempts[0].raw_output == "first"
+    assert results["q"].status is ResultStatus.QUESTION_ERROR
