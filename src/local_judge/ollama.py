@@ -7,7 +7,10 @@ TransportOutcome for the type executor and trace recorder. It never parses
 model output into typed answers.
 """
 
+import http.client
+import ipaddress
 import json
+import time
 import urllib.error
 import urllib.request
 from urllib.parse import urlparse
@@ -47,10 +50,18 @@ class OllamaTransport:
 
 
 def _require_loopback(base_url: str) -> None:
-    """Local profiles only: http URLs on loopback hosts, never arbitrary hosts."""
+    """Local profiles only: http URLs on literal loopback IPs, never DNS names."""
     parsed = urlparse(base_url)
     host = (parsed.hostname or "").lower()
-    if parsed.scheme != "http" or not (host == "localhost" or host == "::1" or host.startswith("127.")):
+    try:
+        address = ipaddress.ip_address(host)
+    except ValueError:
+        raise ValueError(
+            f"Ollama profiles must use a literal loopback IP, got hostname {host!r}"
+        ) from None
+    if parsed.scheme != "http" or not (
+        address.is_loopback and address.version == 4 or str(address) == "::1"
+    ):
         raise ValueError(
             f"Ollama profiles must be local http endpoints on loopback, got {base_url!r}"
         )
@@ -82,6 +93,7 @@ class OllamaModelPort:
         model: str,
         rendered_messages: Sequence[Mapping[str, Any]],
         inference: Inference,
+        response_schema: Mapping[str, Any] | None = None,
     ) -> RawAttempt:
         profile = self._profiles.get(model)
         if profile is None:
@@ -109,6 +121,10 @@ class OllamaModelPort:
             "stream": False,
             "options": self._options(inference, profile),
         }
+        if response_schema is not None:
+            # The backend JSON schema for the sample-output union; Stage 3's
+            # versioned prompt owns the artifact, the port only transports it.
+            payload["format"] = response_schema
         path = f"{profile.base_url.rstrip('/')}/api/chat"
         try:
             response = self._transport.post(path, payload, inference.timeout_ms)
@@ -155,18 +171,30 @@ class UrllibOllamaTransport:
     """Real transport: one stdlib POST per attempt, timeout in milliseconds."""
 
     def __init__(self, opener: urllib.request.OpenerDirector | None = None) -> None:
-        self._opener = opener or urllib.request.build_opener(_NoRedirect)
+        # ProxyHandler({}) ignores env proxies: local-only means the POST never leaves the box.
+        self._opener = opener or urllib.request.build_opener(
+            urllib.request.ProxyHandler({}), _NoRedirect
+        )
 
     def post(self, path: str, payload: Mapping[str, Any], timeout_ms: int) -> TransportResponse:
         body = json.dumps(payload, allow_nan=False).encode("utf-8")
         request = urllib.request.Request(
             path, data=body, headers={"Content-Type": "application/json"}, method="POST"
         )
+        deadline = time.monotonic() + timeout_ms / 1000
         try:
             with self._opener.open(request, timeout=timeout_ms / 1000) as handle:
-                return TransportResponse(
-                    status_code=handle.status, body=handle.read().decode("utf-8", "replace")
-                )
+                chunks = []
+                while True:
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        raise OllamaTransportTimeout("attempt deadline exceeded")
+                    chunk = handle.read(65536)
+                    if not chunk:
+                        break
+                    chunks.append(chunk)
+                body = b"".join(chunks).decode("utf-8", "replace")
+            return TransportResponse(status_code=handle.status, body=body)
         except urllib.error.HTTPError as exc:
             return TransportResponse(status_code=exc.code, body=exc.read().decode("utf-8", "replace"))
         except urllib.error.URLError as exc:
@@ -175,7 +203,7 @@ class UrllibOllamaTransport:
             raise OllamaTransportUnavailable(str(exc)) from exc
         except TimeoutError:
             raise OllamaTransportTimeout("timed out") from None
-        except OSError as exc:
-            # RemoteDisconnected, ConnectionResetError and friends are OSErrors:
-            # every expected transport failure becomes an explicit outcome.
+        except (OSError, http.client.HTTPException) as exc:
+            # RemoteDisconnected, ConnectionResetError, IncompleteRead and
+            # friends: every expected transport failure becomes an outcome.
             raise OllamaTransportUnavailable(str(exc)) from exc

@@ -39,4 +39,5 @@ class LocalModelPort(Protocol):
         model: str,
         rendered_messages: Sequence[Mapping[str, Any]],
         inference: Inference,
+        response_schema: Mapping[str, Any] | None = None,
     ) -> RawAttempt: ...

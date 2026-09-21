@@ -199,6 +199,7 @@ def test_real_transport_maps_oserrors_timeouts_and_redirects():
 
                 class Handle:
                     status = 200
+                    reads = 0
 
                     def __enter__(self):
                         return self
@@ -206,8 +207,9 @@ def test_real_transport_maps_oserrors_timeouts_and_redirects():
                     def __exit__(self, *exc):
                         return False
 
-                    def read(self):
-                        return b"\xff\xfe\xff"
+                    def read(self, n=-1):
+                        self.reads += 1
+                        return b"\xff\xfe\xff" if self.reads == 1 else b""
 
                 return Handle()
 
@@ -235,3 +237,73 @@ def test_real_transport_maps_oserrors_timeouts_and_redirects():
     assert r.status_code == 302  # redirects surface as a response, never followed
     r = run("badbytes")
     assert isinstance(r.body, str)
+
+
+def test_deadline_bounds_a_drip_feeding_server():
+    """urlopen's per-op timeout cannot be dripped past: the port enforces a total deadline."""
+    import io
+    import time
+
+    from local_judge.ollama import OllamaTransportTimeout, UrllibOllamaTransport
+
+    class DripHandle:
+        status = 200
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def read(self, n=-1):
+            time.sleep(0.05)  # drip: each op is fast, the total is not bounded by any single op
+            return b"x"
+
+    class DripOpener:
+        def open(self, request, timeout=None):
+            return DripHandle()
+
+    transport = UrllibOllamaTransport(opener=DripOpener())
+    with pytest.raises(OllamaTransportTimeout):
+        transport.post("http://127.0.0.1:11434/api/chat", {}, 80)
+
+
+def test_response_schema_is_transported_as_format():
+    fake = FakeTransport([ok_response("x")])
+    schema = {"type": "object"}
+    port(transport=fake).attempt("qwen3:8b", MESSAGES, Inference(), response_schema=schema)
+    assert fake.calls[0]["payload"]["format"] == schema
+    fake2 = FakeTransport([ok_response("x")])
+    port(transport=fake2).attempt("qwen3:8b", MESSAGES, Inference())
+    assert "format" not in fake2.calls[0]["payload"]
+
+
+def test_loopback_dns_names_are_rejected_at_construction():
+    from local_judge.ollama import OllamaProfile as Profile
+
+    with pytest.raises(ValueError):
+        Profile(name="evil", base_url="http://127.0.0.1.evil.com")
+    with pytest.raises(ValueError):
+        Profile(name="localhost-name", base_url="http://localhost:11434")
+
+
+def test_http_exception_maps_to_unavailable():
+    import http.client
+    import urllib.request
+
+    from local_judge.ollama import UrllibOllamaTransport
+
+    class RaiserOpener:
+        def open(self, request, timeout=None):
+            raise http.client.IncompleteRead(b"partial")
+
+    transport = UrllibOllamaTransport(opener=RaiserOpener())
+    with pytest.raises(OllamaTransportUnavailable):
+        transport.post("http://127.0.0.1:11434/api/chat", {}, 5)
+    profiles = {
+        "qwen3:8b": OllamaProfile(
+            name="qwen3:8b", supported_inference_settings=frozenset({"sample_count", "temperature", "timeout_ms"})
+        )
+    }
+    attempt = OllamaModelPort(profiles, transport).attempt("qwen3:8b", MESSAGES, Inference())
+    assert attempt.outcome is TransportOutcome.UNAVAILABLE
