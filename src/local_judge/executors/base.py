@@ -230,7 +230,7 @@ class NativeTypeExecutor:
             status=status,
             answer=answer,
             agreement=agreement,
-            requested_samples=len(records),
+            requested_samples=max(len(records), 1),
             error=error,
             trace=trace,
         )
