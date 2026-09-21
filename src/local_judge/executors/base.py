@@ -182,7 +182,7 @@ class NativeTypeExecutor:
                 agreement=None,
             )
         if isinstance(outcome, tuple) and len(outcome) == 2 and outcome[0] == "inability":
-            if outcome[1] not in INABILITY_CODES:
+            if outcome[1] not in INABILITY_CODES and outcome[1] != "AGGREGATION_TIE":
                 raise ValueError(f"aggregate declared unknown inability code: {outcome[1]!r}")
             inability = ErrorObject(code=outcome[1], path="", message="the aggregate declared an inability")
             return self._result(
