@@ -182,13 +182,27 @@ class UrllibOllamaTransport:
             path, data=body, headers={"Content-Type": "application/json"}, method="POST"
         )
         deadline = time.monotonic() + timeout_ms / 1000
+
+        def _remaining_seconds() -> float:
+            return max(deadline - time.monotonic(), 0.001)
+
         try:
-            with self._opener.open(request, timeout=timeout_ms / 1000) as handle:
+            handle = self._opener.open(request, timeout=timeout_ms / 1000)
+            with handle:
+                # Enforce the deadline DURING reads, not just between them: each
+                # socket operation gets the remaining budget as its timeout.
+                sock = getattr(getattr(handle, "fp", None), "raw", None)
+                sock = getattr(sock, "_sock", None)
                 chunks = []
                 while True:
                     remaining = deadline - time.monotonic()
                     if remaining <= 0:
                         raise OllamaTransportTimeout("attempt deadline exceeded")
+                    if sock is not None:
+                        try:
+                            sock.settimeout(remaining)
+                        except (AttributeError, OSError):
+                            sock = None  # soft bound only if internals are unavailable
                     chunk = handle.read(65536)
                     if not chunk:
                         break
@@ -196,7 +210,8 @@ class UrllibOllamaTransport:
                 body = b"".join(chunks).decode("utf-8", "replace")
             return TransportResponse(status_code=handle.status, body=body)
         except urllib.error.HTTPError as exc:
-            return TransportResponse(status_code=exc.code, body=exc.read().decode("utf-8", "replace"))
+            # one bounded read for the error body (socket timeout still applies)
+            return TransportResponse(status_code=exc.code, body=exc.read(65536).decode("utf-8", "replace"))
         except urllib.error.URLError as exc:
             if isinstance(getattr(exc, "reason", None), TimeoutError):
                 raise OllamaTransportTimeout(str(exc)) from exc

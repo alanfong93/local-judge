@@ -264,8 +264,11 @@ def test_deadline_bounds_a_drip_feeding_server():
             return DripHandle()
 
     transport = UrllibOllamaTransport(opener=DripOpener())
+    started = time.monotonic()
     with pytest.raises(OllamaTransportTimeout):
         transport.post("http://127.0.0.1:11434/api/chat", {}, 80)
+    elapsed = time.monotonic() - started
+    assert elapsed < 0.3, f"deadline not enforced during reads: {elapsed:.3f}s for an 80ms budget"
 
 
 def test_response_schema_is_transported_as_format():
