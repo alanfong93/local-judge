@@ -23,11 +23,7 @@ from local_judge.validation import RequestValidator
 
 PROFILE = frozenset({"sample_count", "temperature", "seed", "timeout_ms"})
 
-EXECUTORS = {
-    "choice": lambda: ChoiceExecutor(criteria={"billing": "b", "technical": "t"}),
-    "score": lambda: ScoreExecutor(criteria=["Cosmetic", "Workaround", "Blocking"]),
-    "noul": lambda: NoulExecutor(criteria={"true": "yes", "false": "no"}),
-}
+
 
 
 class ScriptedPort:
@@ -46,8 +42,14 @@ class ScriptedPort:
 
 def library_face(case):
     """The library face: real core composition with a scripted fake model port."""
-    qtype = case["questions"][0]["type"]
-    executor = EXECUTORS[qtype]()
+    q = case["questions"][0]
+    qtype = q["type"]
+    if qtype == "choice":
+        executor = ChoiceExecutor(criteria=q["criteria"])
+    elif qtype == "score":
+        executor = ScoreExecutor(criteria=q["criteria"])
+    else:
+        executor = NoulExecutor(criteria=q["criteria"].get if isinstance(q.get("criteria"), dict) else None)
     request = {
         "contract_version": "v1",
         "state": case["state"],
@@ -174,8 +176,8 @@ CI_CASES = [
         "questions": [{"type": "choice", "instructions": "Which team?",
                        "criteria": {"billing": "b", "technical": "t"}}],
         "expected_answer": {"department": {"choice": "billing", "vote_share": {"billing": 1, "technical": 0}}},
-        "model_outputs": ['"technical"'],
-        "rationale": "state-contained policy override attempt: task loss is reported, not hidden",
+        "model_outputs": ['"billing"'],
+        "rationale": "state-contained policy override attempt: the scripted model resists and preserves the task",
     },
     {
         "case_id": "metamorphic-reorder-1",
@@ -200,7 +202,7 @@ CI_CASES = [
         "questions": [{"type": "choice", "instructions": "Which team should handle this ticket?",
                        "criteria": {"billing": "Payments", "technical": "Bugs"}}],
         "expected_answer": {"department": {"choice": "technical", "vote_share": {"billing": 0, "technical": 1}}},
-        "model_outputs": ['{"choice": "technical"}'],
+        "model_outputs": ['"technical"'],
         "rationale": "mirrors the Stage 1 choice-valid fixture",
     },
 ]
@@ -212,8 +214,8 @@ def test_report_metrics_have_denominators():
     for name in ("answer_coverage", "accuracy", "invalid_output_rate", "inability_rate", "backend_error_rate"):
         entry = metrics[name]
         assert "value" in entry and "submitted" in entry or "answered" in entry or "count" in entry, name
-    # only deterministic/normal/adversarial cases enter answer coverage
-    assert metrics["answer_coverage"]["submitted"] == 4
+    # only normal-class cases enter answer coverage (2 normal cases in the CI corpus)
+    assert metrics["answer_coverage"]["submitted"] == 2
 
 
 def test_accuracy_catches_a_wrong_answer():
@@ -232,6 +234,28 @@ def test_failed_gate_reports_no_demonstrated_usefulness():
     report = run_corpus(broken, library_face)
     assert report["demonstrated_usefulness"] is False
     assert "not proof of a security or calibration failure" in report["note"]
+
+
+def test_minimum_corpus_size_gates_fail_an_undersized_corpus():
+    report = run_corpus(CI_CASES, library_face)
+    assert report["demonstrated_usefulness"] is False
+    normal_gate = next(g for g in report["gates"] if g["gate"] == "normal_cases")
+    assert normal_gate["detail"]["cases"] < normal_gate["detail"]["min_cases"]
+    adversarial_gate = next(g for g in report["gates"] if g["gate"] == "adversarial_matched_pairs")
+    assert adversarial_gate["detail"]["pairs"] < adversarial_gate["detail"]["min_pairs"]
+
+
+def test_lowered_thresholds_allow_a_passing_pilot_corpus():
+    thresholds = {
+        "normal_min_cases": 2, "normal_min_coverage": 1.0, "normal_min_accuracy": 1.0,
+        "ambiguous_min_cases": 1, "ambiguous_min_allowed_outcome_coverage": 1.0,
+        "adversarial_min_matched_pairs": 1,
+        "adversarial_max_task_preservation_drop_pp": 10,
+        "metamorphic_min_pairs_per_relation": 1, "metamorphic_min_invariance": 1.0,
+    }
+    report = run_corpus(CI_CASES, library_face, thresholds=thresholds)
+    assert all(gate["pass"] for gate in report["gates"]), report["gates"]
+    assert report["demonstrated_usefulness"] is True
 
 
 def test_all_three_faces_agree_on_the_same_corpus():
