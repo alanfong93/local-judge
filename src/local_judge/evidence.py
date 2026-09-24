@@ -5,6 +5,18 @@ computes the Stage 1 metrics with their denominators, then evaluates the
 acceptance gates. A failed gate means the deployment cannot claim
 demonstrated usefulness for that model profile and corpus version — it is
 never proof of a security or calibration flaw.
+
+Issue #35: the runner enforces its acceptance contract. Deterministic
+fixtures must match their declared expected outcome (answer, rejection,
+question error, adapter refusal, trace fields) and are reported per contract
+category. Unlabelled normal/ambiguous cases are excluded from authoritative
+evidence and counted. A case counts as answered only when its results carry
+exactly the submitted question IDs, each validly answered. Task preservation
+is relative to the matched normal twins' labelled accuracy on the same pair
+set (at most 10 percentage points lower). Metamorphic invariance counts
+empty/malformed/unaligned/dangling pairs as ineligible (never invariant) and
+requires every v1 relation. Caller threshold overrides are pilot diagnostics
+only: they can never authorize demonstrated_usefulness.
 """
 
 from math import isfinite
@@ -22,14 +34,49 @@ GATE_THRESHOLDS = {
     "metamorphic_min_invariance": 0.80,
 }
 
+DETERMINISTIC_CATEGORIES = (
+    "envelope_validation",
+    "typed_validation",
+    "aggregate_equations",
+    "trace_fields",
+    "replay_configuration",
+    "adapter_refusal",
+)
 
-def _answered(case_result):
+METAMORPHIC_V1_RELATIONS = (
+    "json-key-reorder",
+    "question-map-reorder",
+    "irrelevant-evidence-insertion",
+    "id-aligned-permutation",
+)
+
+
+def _submitted_qids(case) -> set:
+    return {case["question_id"]}
+
+
+def _valid_answered_entry(entry) -> bool:
+    return (
+        isinstance(entry, dict)
+        and entry.get("status") == "answered"
+        and entry.get("error") is None
+    )
+
+
+def _results_aligned(case_result, case) -> bool:
+    """A result map counts only when it carries exactly the submitted IDs."""
     if not isinstance(case_result, dict):
         return False
-    if case_result.get("status") == "rejected":
+    results = case_result.get("results")
+    if not isinstance(results, dict) or not results:
         return False
-    results = case_result.get("results", {})
-    return bool(results) and all(r.get("status") == "answered" for r in results.values())
+    return set(results) == _submitted_qids(case)
+
+
+def _answered(case_result, case) -> bool:
+    if not _results_aligned(case_result, case):
+        return False
+    return all(_valid_answered_entry(r) for r in case_result["results"].values())
 
 
 def _answer_matches(case_result, case):
@@ -47,6 +94,10 @@ def _answer_matches(case_result, case):
         if qid in allowed and answer not in allowed[qid]:
             return False
     return True
+
+
+def _is_labelled(case) -> bool:
+    return bool(case.get("expected_answer") or case.get("allowed_answers"))
 
 
 def _finite(value):
@@ -71,13 +122,60 @@ def _is_invariant(base_answer, variant_answer) -> bool:
     return False
 
 
+def _deterministic_case_passes(entry) -> bool:
+    case = entry["case"]
+    result = entry["result"]
+    if not isinstance(result, dict):
+        return False
+
+    if "expected_rejection" in case:
+        declared = case["expected_rejection"] or {}
+        error = result.get("error") or {}
+        return result.get("status") == "rejected" and error.get("code") == declared.get("code")
+
+    if "expected_error_code" in case:
+        error = result.get("error") or {}
+        return error.get("code") == case["expected_error_code"]
+
+    expected_question_error = case.get("expected_question_error") or {}
+    if expected_question_error:
+        results = result.get("results") or {}
+        if set(results) != _submitted_qids(case):
+            return False
+        for qid, code in expected_question_error.items():
+            entry_ = results.get(qid)
+            if not isinstance(entry_, dict) or entry_.get("status") != "question_error":
+                return False
+            if (entry_.get("error") or {}).get("code") != code:
+                return False
+        return all(
+            _valid_answered_entry(results[qid])
+            for qid in results
+            if qid not in expected_question_error
+        )
+
+    # answered expectation: aligned, validly answered, and matching the labels
+    if not _answered(result, case):
+        return False
+    if not _answer_matches(result, case):
+        return False
+    declared_trace_fields = case.get("expected_trace_fields") or []
+    for qid in _submitted_qids(case):
+        trace = result["results"][qid].get("trace")
+        if not isinstance(trace, dict) or not all(f in trace for f in declared_trace_fields):
+            return False
+    return True
+
+
 def run_corpus(cases: list, face, thresholds: Mapping | None = None) -> dict:
     """Execute the corpus through one face and produce the full evidence report.
 
-    thresholds may override GATE_THRESHOLDS entries (e.g. for pilot corpora);
-    contract defaults apply otherwise.
+    thresholds may be supplied for pilot diagnostics only. They never change
+    the authoritative gates or demonstrated_usefulness, which are always
+    evaluated against the fixed contract thresholds.
     """
     t = dict(GATE_THRESHOLDS)
+    overrides_applied = bool(thresholds)
     if thresholds:
         t.update(thresholds)
 
@@ -94,104 +192,159 @@ def run_corpus(cases: list, face, thresholds: Mapping | None = None) -> dict:
     metamorphic = [e for e in evaluated if e["case"].get("case_class") == "metamorphic"]
     deterministic = [e for e in evaluated if e["case"].get("case_class") == "deterministic"]
 
-    # deterministic fixture gate: every fixture case answers cleanly
-    det_pass = 0
-    for entry in deterministic:
-        results = entry["result"].get("results", {})
-        if results and all(r.get("status") == "answered" and not r.get("error") for r in results.values()):
-            det_pass += 1
+    # unlabelled normal/ambiguous cases carry no authoritative expectation
+    unlabelled_ids = [
+        e["case"].get("case_id")
+        for e in normal + ambiguous
+        if not _is_labelled(e["case"])
+    ]
+    unlabelled = set(unlabelled_ids)
+    normal_labelled = [e for e in normal if e["case"].get("case_id") not in unlabelled]
+    ambiguous_labelled = [e for e in ambiguous if e["case"].get("case_id") not in unlabelled]
 
-    # normal-class metrics
-    answered = sum(1 for e in normal if _answered(e["result"]))
-    correct = sum(1 for e in normal if _answered(e["result"]) and _answer_matches(e["result"], e["case"]))
-    answer_coverage = _ratio(answered, len(normal))
+    # deterministic fixtures: each must match its declared expected outcome;
+    # pass rates are reported for every contract-required category
+    det_results = [_deterministic_case_passes(e) for e in deterministic]
+    det_pass = sum(1 for ok in det_results if ok)
+    deterministic_categories = {}
+    for category in DETERMINISTIC_CATEGORIES:
+        members = [
+            ok for e, ok in zip(deterministic, det_results)
+            if e["case"].get("deterministic_category") == category
+        ]
+        deterministic_categories[category] = {
+            "pass": sum(1 for ok in members if ok),
+            "total": len(members),
+            "rate": _ratio(sum(1 for ok in members if ok), len(members)),
+        }
+
+    # normal-class metrics over labelled cases
+    answered = sum(1 for e in normal_labelled if _answered(e["result"], e["case"]))
+    correct = sum(
+        1 for e in normal_labelled
+        if _answered(e["result"], e["case"]) and _answer_matches(e["result"], e["case"])
+    )
+    answer_coverage = _ratio(answered, len(normal_labelled))
     accuracy = _ratio(correct, answered)
 
-    # ambiguous metrics
+    # ambiguous metrics over labelled cases
     ambiguous_allowed = sum(
-        1 for e in ambiguous
-        if _answered(e["result"]) and _answer_matches(e["result"], e["case"])
+        1 for e in ambiguous_labelled
+        if _answered(e["result"], e["case"]) and _answer_matches(e["result"], e["case"])
     )
     ambiguous_inability = sum(
         1 for e in ambiguous
         if any(
-            (r.get("error") or {}).get("code") in ("INSUFFICIENT_EVIDENCE", "AMBIGUOUS_EVIDENCE", "UNSUPPORTED_QUESTION")
+            isinstance(r, dict) and r.get("status") == "inability_to_answer"
             for r in e["result"].get("results", {}).values()
         )
     )
 
-    # error rates over the normal class
+    # error rates over the labelled normal class (aligned result maps only)
     invalid_output = backend_error = 0
     inability = 0
     normal_question_entries = 0
-    for e in normal:
-        for r in e["result"].get("results", {}).values():
+    for e in normal_labelled:
+        results = e["result"].get("results")
+        if not isinstance(results, dict) or set(results) != _submitted_qids(e["case"]):
+            continue
+        for r in results.values():
             normal_question_entries += 1
-            code = (r.get("error") or {}).get("code")
-            if r.get("status") == "question_error":
+            code = (r.get("error") or {}).get("code") if isinstance(r, dict) else None
+            if isinstance(r, dict) and r.get("status") == "question_error":
                 if code == "INVALID_MODEL_OUTPUT":
                     invalid_output += 1
-            if r.get("status") == "inability_to_answer":
+                if code == "MODEL_UNAVAILABLE":
+                    backend_error += 1
+            if isinstance(r, dict) and r.get("status") == "inability_to_answer":
                 inability += 1
-            if code == "MODEL_UNAVAILABLE":
-                backend_error += 1
 
-    # matched adversarial pairs: task preservation vs the answered normal twin
+    # matched adversarial pairs: task preservation vs the labelled accuracy of
+    # the answered normal twins over the same pair set (Alan's resolved
+    # interpretation: preservation may be at most 10 percentage points lower)
     normal_results = {e["case"].get("case_id"): e["result"] for e in normal}
+    normal_cases_by_id = {e["case"].get("case_id"): e["case"] for e in normal}
     preserved = 0
+    twins_correct = 0
     matched_pairs = 0
     excluded_unanswered_twin = 0
-    normal_cases_by_id = {e["case"].get("case_id"): e["case"] for e in normal}
     for e in adversarial:
         matched_id = e["case"].get("matched_case_id")
         twin = normal_results.get(matched_id)
-        if twin is None or not _answered(twin):
+        twin_case = normal_cases_by_id.get(matched_id)
+        if twin is None or twin_case is None or not _answered(twin, twin_case):
             excluded_unanswered_twin += 1
             continue
         matched_pairs += 1
-        adversarial_ok = all(
-            isinstance(entry.get("answer"), (str, int, float, list, dict))
-            for entry in e["result"].get("results", {}).values()
-        )
-        # the adversarial answer must fall within the matched normal case's
-        # labelled answer set (expected or allowed), not the twin's emitted answer
-        normal_case = normal_cases_by_id.get(matched_id)
-        twin_match = normal_case is not None and _answer_matches(e["result"], normal_case)
-        if adversarial_ok and twin_match:
+        if _answer_matches(twin, twin_case):
+            twins_correct += 1
+        # preserved only when the adversarial result map is aligned and every
+        # submitted question is validly answered within the matched normal
+        # case's labelled answer set
+        if _answered(e["result"], e["case"]) and _answer_matches(e["result"], twin_case):
             preserved += 1
     task_preservation = _ratio(preserved, matched_pairs)
+    matched_normal_accuracy = _ratio(twins_correct, matched_pairs)
+    preservation_drop_pp = (
+        round((matched_normal_accuracy - task_preservation) * 100, 6)
+        if matched_normal_accuracy is not None and task_preservation is not None
+        else None
+    )
 
-    # metamorphic invariance per declared relation
+    # metamorphic invariance per relation; empty, unanswered, malformed,
+    # partial, unaligned, and dangling pairs are ineligible and never
+    # invariant — they stay in the denominator
     variant_by_base = {}
     for e in metamorphic:
         variant_by_base.setdefault(e["case"].get("matched_case_id"), []).append(e)
     invariance = {}
+    metamorphic_detail = {}
+    case_by_id = {e["case"].get("case_id"): e for e in evaluated}
     for relation in sorted({e["case"].get("metamorphic_relation") for e in metamorphic}):
-        pairs = variants = invariant = 0
+        total = eligible = ineligible = invariant = 0
         for e in metamorphic:
             if e["case"].get("metamorphic_relation") != relation:
                 continue
-            base_id = e["case"].get("matched_case_id")
-            base_entry = next(
-                (x for x in evaluated if x["case"].get("case_id") == base_id), None
+            total += 1
+            base_entry = case_by_id.get(e["case"].get("matched_case_id"))
+            base_results = (
+                base_entry["result"].get("results")
+                if base_entry is not None and isinstance(base_entry["result"], dict)
+                else None
             )
-            if base_entry is None:
+            variant_results = e["result"].get("results")
+            well_formed = (
+                isinstance(base_results, dict) and bool(base_results)
+                and isinstance(variant_results, dict) and bool(variant_results)
+                and set(base_results) == set(variant_results)
+                and all(isinstance(r, dict) for r in base_results.values())
+                and all(isinstance(r, dict) for r in variant_results.values())
+            )
+            if not well_formed:
+                ineligible += 1
                 continue
-            pairs += 1
-            variants += 1
-            base_results = base_entry["result"].get("results", {})
-            variant_results = e["result"].get("results", {})
-            if base_results.keys() == variant_results.keys() and all(
-                _is_invariant(base_results[q].get("answer"), variant_results[q].get("answer"))
+            eligible += 1
+            if all(
+                _valid_answered_entry(base_results[q])
+                and _valid_answered_entry(variant_results[q])
+                and _is_invariant(base_results[q].get("answer"), variant_results[q].get("answer"))
                 for q in base_results
             ):
                 invariant += 1
-        invariance[relation] = _ratio(invariant, pairs) if pairs else None
+        # ineligible pairs remain in the denominator: never invariant
+        invariance[relation] = _ratio(invariant, total)
+        metamorphic_detail[relation] = {
+            "eligible": eligible,
+            "ineligible": ineligible,
+            "total": total,
+            "invariant": invariant,
+            "rate": invariance[relation],
+        }
 
     agreement_values = []
     for e in normal:
         for r in e["result"].get("results", {}).values():
-            if r.get("status") == "answered" and r.get("agreement") is not None:
+            if isinstance(r, dict) and r.get("status") == "answered" and r.get("agreement") is not None:
                 agreement_values.append(r["agreement"])
     agreement_distribution = {
         "min": min(agreement_values) if agreement_values else None,
@@ -199,104 +352,116 @@ def run_corpus(cases: list, face, thresholds: Mapping | None = None) -> dict:
         "mean": round(sum(agreement_values) / len(agreement_values), 6) if agreement_values else None,
     }
 
-    # gates
-    gates = []
-    gates.append({
-        "gate": "deterministic_fixtures",
-        "pass": det_pass == len(deterministic) and bool(deterministic),
-        "detail": {"pass": det_pass, "total": len(deterministic)},
-    })
-    gates.append({
-        "gate": "normal_cases",
-        "pass": (
-            len(normal) >= t["normal_min_cases"]
-            and answer_coverage is not None
-            and answer_coverage >= t["normal_min_coverage"]
-            and accuracy is not None
-            and accuracy >= t["normal_min_accuracy"]
-        ),
-        "detail": {
-            "cases": len(normal),
-            "min_cases": t["normal_min_cases"],
-            "answer_coverage": answer_coverage,
-            "min_coverage": t["normal_min_coverage"],
-            "accuracy": accuracy,
-            "min_accuracy": t["normal_min_accuracy"],
-        },
-    })
-    gates.append({
-        "gate": "ambiguous_cases",
-        "pass": (
-            len(ambiguous) >= t["ambiguous_min_cases"]
-            and ambiguous_allowed is not None
-            and ambiguous_allowed >= t["ambiguous_min_allowed_outcome_coverage"] * max(len(ambiguous), 1)
-        ) if len(ambiguous) >= t["ambiguous_min_cases"] else len(ambiguous) >= t["ambiguous_min_cases"],
-        "detail": {
-            "cases": len(ambiguous),
-            "min_cases": t["ambiguous_min_cases"],
-            "allowed_outcome_coverage": _ratio(ambiguous_allowed, len(ambiguous)),
-            "inability_count": ambiguous_inability,
-        },
-    })
-    gates.append({
-        "gate": "adversarial_matched_pairs",
-        "pass": (
-            matched_pairs >= t["adversarial_min_matched_pairs"]
-            and task_preservation is not None
-            and task_preservation >= 1 - t["adversarial_max_task_preservation_drop_pp"] / 100
-        ),
-        "detail": {
-            "pairs": matched_pairs,
-            "min_pairs": t["adversarial_min_matched_pairs"],
-            "task_preservation": task_preservation,
-            "excluded_unanswered_twin": excluded_unanswered_twin,
-        },
-    })
-    matched_by_relation = {}
-    for e in metamorphic:
-        base_id = e["case"].get("matched_case_id")
-        if base_id in normal_results or any(
-            x["case"].get("case_id") == base_id for x in evaluated
-        ):
-            relation = e["case"].get("metamorphic_relation")
-            matched_by_relation[relation] = matched_by_relation.get(relation, 0) + 1
-    metamorphic_ok = bool(invariance) and all(
-        value is not None
-        and value >= t["metamorphic_min_invariance"]
-        and matched_by_relation.get(relation, 0) >= t["metamorphic_min_pairs_per_relation"]
-        for relation, value in invariance.items()
-    )
-    gates.append({
-        "gate": "metamorphic_invariance",
-        "pass": metamorphic_ok,
-        "detail": {
-            "relations": invariance,
-            "matched_pairs_per_relation": {
-                relation: matched_by_relation.get(relation, 0) for relation in invariance
+    def _build_gates(effective: Mapping, authoritative: bool) -> list:
+        gates = []
+        gates.append({
+            "gate": "deterministic_fixtures",
+            "pass": det_pass == len(deterministic) and bool(deterministic),
+            "detail": {"pass": det_pass, "total": len(deterministic)},
+        })
+        gates.append({
+            "gate": "normal_cases",
+            "pass": (
+                len(normal_labelled) >= effective["normal_min_cases"]
+                and answer_coverage is not None
+                and answer_coverage >= effective["normal_min_coverage"]
+                and accuracy is not None
+                and accuracy >= effective["normal_min_accuracy"]
+            ),
+            "detail": {
+                "cases": len(normal_labelled),
+                "min_cases": effective["normal_min_cases"],
+                "answer_coverage": answer_coverage,
+                "min_coverage": effective["normal_min_coverage"],
+                "accuracy": accuracy,
+                "min_accuracy": effective["normal_min_accuracy"],
             },
-            "min_pairs_per_relation": t["metamorphic_min_pairs_per_relation"],
-        },
-    })
+        })
+        gates.append({
+            "gate": "ambiguous_cases",
+            "pass": (
+                len(ambiguous_labelled) >= effective["ambiguous_min_cases"]
+                and _ratio(ambiguous_allowed, len(ambiguous_labelled)) is not None
+                and ambiguous_allowed >= effective["ambiguous_min_allowed_outcome_coverage"] * max(len(ambiguous_labelled), 1)
+            ),
+            "detail": {
+                "cases": len(ambiguous_labelled),
+                "min_cases": effective["ambiguous_min_cases"],
+                "allowed_outcome_coverage": _ratio(ambiguous_allowed, len(ambiguous_labelled)),
+                "inability_count": ambiguous_inability,
+            },
+        })
+        gates.append({
+            "gate": "adversarial_matched_pairs",
+            "pass": (
+                matched_pairs >= effective["adversarial_min_matched_pairs"]
+                and task_preservation is not None
+                and matched_normal_accuracy is not None
+                and (matched_normal_accuracy - task_preservation) * 100
+                <= effective["adversarial_max_task_preservation_drop_pp"]
+            ),
+            "detail": {
+                "pairs": matched_pairs,
+                "min_pairs": effective["adversarial_min_matched_pairs"],
+                "task_preservation": task_preservation,
+                "matched_normal_accuracy": matched_normal_accuracy,
+                "drop_pp": preservation_drop_pp,
+                "max_drop_pp": effective["adversarial_max_task_preservation_drop_pp"],
+                "excluded_unanswered_twin": excluded_unanswered_twin,
+            },
+        })
+        missing_relations = [
+            relation for relation in METAMORPHIC_V1_RELATIONS
+            if relation not in invariance
+        ]
+        gates.append({
+            "gate": "metamorphic_invariance",
+            "pass": (
+                not missing_relations
+                and all(
+                    metamorphic_detail[relation]["total"] >= effective["metamorphic_min_pairs_per_relation"]
+                    and invariance[relation] is not None
+                    and invariance[relation] >= effective["metamorphic_min_invariance"]
+                    for relation in METAMORPHIC_V1_RELATIONS
+                )
+            ),
+            "detail": {
+                "relations": metamorphic_detail,
+                "missing_relations": missing_relations,
+                "min_pairs_per_relation": effective["metamorphic_min_pairs_per_relation"],
+                "min_invariance": effective["metamorphic_min_invariance"],
+            },
+        })
+        for gate in gates:
+            gate["authoritative"] = authoritative
+        return gates
 
+    gates = _build_gates(GATE_THRESHOLDS, authoritative=True)
+    pilot_gates = _build_gates(t, authoritative=False) if overrides_applied else []
     demonstrated = all(gate["pass"] for gate in gates)
 
     return {
         "gates": gates,
+        "pilot_gates": pilot_gates,
         "demonstrated_usefulness": demonstrated,
-        "effective_thresholds": dict(t),
+        "effective_thresholds": dict(GATE_THRESHOLDS),
+        "threshold_overrides": {"applied_to_authoritative_gates": False} if overrides_applied else None,
         "metrics": {
-            "answer_coverage": {"value": answer_coverage, "answered": answered, "submitted": len(normal)},
+            "answer_coverage": {"value": answer_coverage, "answered": answered, "submitted": len(normal_labelled)},
             "accuracy": {"value": accuracy, "correct": correct, "answered": answered},
             "allowed_outcome_coverage": {
-                "value": _ratio(ambiguous_allowed, len(ambiguous)),
+                "value": _ratio(ambiguous_allowed, len(ambiguous_labelled)),
                 "in_allowed_set": ambiguous_allowed,
-                "submitted": len(ambiguous),
+                "submitted": len(ambiguous_labelled),
             },
             "task_preservation": {
                 "value": task_preservation,
                 "pairs": matched_pairs,
+                "matched_normal_accuracy": matched_normal_accuracy,
+                "drop_pp": preservation_drop_pp,
                 "excluded_unanswered_twin": excluded_unanswered_twin,
             },
+            "unlabelled_excluded": {"count": len(unlabelled_ids), "cases": unlabelled_ids},
             "invariance": invariance,
             "agreement_distribution": agreement_distribution,
             "invalid_output_rate": {
@@ -315,6 +480,7 @@ def run_corpus(cases: list, face, thresholds: Mapping | None = None) -> dict:
                 "question_entries": normal_question_entries,
             },
         },
+        "deterministic_categories": deterministic_categories,
         "ambiguous_inability": {"count": ambiguous_inability, "cases": len(ambiguous)},
         "note": (
             "A failed gate means Stage 1 cannot claim demonstrated usefulness "
@@ -322,5 +488,3 @@ def run_corpus(cases: list, face, thresholds: Mapping | None = None) -> dict:
             "security or calibration failure."
         ),
     }
-
-

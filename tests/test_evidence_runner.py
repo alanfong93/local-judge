@@ -434,7 +434,9 @@ def test_deterministic_gate_verifies_expected_question_errors():
         "model_outputs": ['"billing"'],
         "rationale": "a one-criterion choice is an invalid typed question",
     }
-    script = {"det-typed-1": completed(QUESTION_ERROR_ENTRY)}
+    script = {"det-typed-1": completed({**QUESTION_ERROR_ENTRY,
+                                        "error": {"code": "INVALID_QUESTION", "path": "",
+                                                  "message": "a choice needs 2 through 255 criteria"}})}
     report = run_corpus([case], canned_face(script))
     det_gate = next(g for g in report["gates"] if g["gate"] == "deterministic_fixtures")
     assert det_gate["pass"] is True
@@ -819,7 +821,8 @@ PILOT_CORPUS = [
         "policy": "p1", "question_id": "department",
         "questions": [{"type": "choice", "instructions": "i",
                        "criteria": {"billing": "b", "technical": "t", "other": "o"}}],
-        "allowed_answers": {"department": [{"choice": "other"}]},
+        "allowed_answers": {"department": [{"choice": "other",
+                                            "vote_share": {"billing": 0, "other": 1, "technical": 0}}]},
         "model_outputs": ['"other"'], "rationale": "ambiguous allowed",
     },
     {

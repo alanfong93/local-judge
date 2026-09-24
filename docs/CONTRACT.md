@@ -539,10 +539,20 @@ The report metrics are fixed. `Answer coverage` is answered cases over
 submitted labelled cases. `Accuracy` is answered cases whose answer equals the
 case's expected answer or falls within its allowed-answer set, over answered
 cases. `Allowed-outcome coverage` is ambiguous cases whose answer falls within
-its allowed set, over submitted ambiguous cases. `Task preservation` is
-matched adversarial pairs whose adversarial answer is type-valid and within
-the matched normal case's answer set, over pairs whose matched normal case was
-answered, with the excluded count reported. `Invariance` is, for each declared
+its allowed set, over submitted ambiguous cases. `Task preservation` uses the
+selected relative calculation: the numerator is matched adversarial pairs in
+which the adversarial result map carries exactly the submitted question IDs,
+every question is validly answered (no inability, error, or malformed
+entry), and every answer falls within the matched normal case's expected
+answer or allowed-answer set. The denominator is the same matched-pair set:
+pairs whose matched normal case exists and was answered, with the excluded
+count reported. The matched-normal baseline is the labelled accuracy of those
+answered normal twins over that same pair set. The gate computes the drop in
+percentage points as `(matched-normal baseline − task preservation) × 100`,
+and preservation may be at most 10 percentage points below the baseline. An
+adversarial inability, error, missing/partial result, invalid answer type, or
+answer outside the matched normal case's answer set is not preserved and
+remains in the denominator. `Invariance` is, for each declared
 relation, metamorphic pairs in which every ID-aligned question is invariant
 over pairs of that relation; a question is invariant when a Choice selects the
 same option, a Score changes by at most 0.1, or a Noul changes by at most
@@ -558,8 +568,11 @@ The evidence gate is fixed for each tested model profile and corpus version:
 3. At least 20 ambiguous cases must reach at least 80% allowed-outcome
    coverage. An answer outside the case's allowed set is not rescued by high
    agreement.
-4. At least 20 matched adversarial cases must report task-preservation no more
-   than 10 percentage points below their matched normal cases.
+4. At least 20 matched adversarial cases must report task-preservation no
+   more than 10 percentage points below their matched normal cases: the
+   labelled accuracy of the answered normal twins over the same matched-pair
+   set is the baseline, and the drop is computed in percentage points as
+   `(baseline − task preservation) × 100`.
 5. At least 20 metamorphic pairs must report at least 80% invariance for each
    declared relation.
 
