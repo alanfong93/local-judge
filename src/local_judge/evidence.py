@@ -50,9 +50,21 @@ METAMORPHIC_V1_RELATIONS = (
     "id-aligned-permutation",
 )
 
+_ANSWER_TYPES = frozenset({"choice", "score", "noul"})
+
 
 def _submitted_qids(case) -> set:
     return {case["question_id"]}
+
+
+def _answer_type_ok(entry) -> bool:
+    """A native answered entry carries a type-specific answer object: the
+    answer is an object whose only type discriminator is the entry's type."""
+    type_ = entry.get("type")
+    answer = entry.get("answer")
+    if type_ not in _ANSWER_TYPES or not isinstance(answer, dict):
+        return False
+    return (_ANSWER_TYPES & set(answer)) == {type_}
 
 
 def _valid_answered_entry(entry) -> bool:
@@ -60,6 +72,7 @@ def _valid_answered_entry(entry) -> bool:
         isinstance(entry, dict)
         and entry.get("status") == "answered"
         and entry.get("error") is None
+        and _answer_type_ok(entry)
     )
 
 
@@ -109,23 +122,40 @@ def _ratio(numerator: int, denominator: int):
 
 
 def _is_invariant(base_answer, variant_answer) -> bool:
-    if base_answer is None or variant_answer is None:
+    """Invariance compares one shared type discriminator (docs/CONTRACT.md
+    'Acceptance Evidence'): a Choice selects the same option, a Score changes
+    by at most 0.1, a Noul changes by at most 0.05. Answers that do not carry
+    exactly one matching discriminator are not type-valid and never count."""
+    if not isinstance(base_answer, dict) or not isinstance(variant_answer, dict):
         return False
-    if set(base_answer) != set(variant_answer):
+    base_keys = _ANSWER_TYPES & set(base_answer)
+    variant_keys = _ANSWER_TYPES & set(variant_answer)
+    if len(base_keys) != 1 or base_keys != variant_keys:
         return False
-    if "choice" in base_answer:
+    if base_keys == {"choice"}:
         return base_answer["choice"] == variant_answer["choice"]
-    if "score" in base_answer:
+    if base_keys == {"score"}:
         return abs(base_answer["score"] - variant_answer["score"]) <= 0.1
-    if "noul" in base_answer:
-        return abs(base_answer["noul"] - variant_answer["noul"]) <= 0.05
-    return False
+    return abs(base_answer["noul"] - variant_answer["noul"]) <= 0.05
 
 
 def _deterministic_case_passes(entry) -> bool:
     case = entry["case"]
     result = entry["result"]
     if not isinstance(result, dict):
+        return False
+    # a fixture that declares no expected outcome has nothing to enforce;
+    # it never passes vacuously
+    if not any(
+        key in case
+        for key in (
+            "expected_answer",
+            "allowed_answers",
+            "expected_rejection",
+            "expected_error_code",
+            "expected_question_error",
+        )
+    ):
         return False
 
     if "expected_rejection" in case:
@@ -135,7 +165,12 @@ def _deterministic_case_passes(entry) -> bool:
 
     if "expected_error_code" in case:
         error = result.get("error") or {}
-        return error.get("code") == case["expected_error_code"]
+        # a completed native response carries error: null; only the adapter
+        # refusal shape (no status) or a native rejection may bear an error
+        return (
+            result.get("status") in (None, "rejected")
+            and error.get("code") == case["expected_error_code"]
+        )
 
     expected_question_error = case.get("expected_question_error") or {}
     if expected_question_error:
@@ -272,7 +307,14 @@ def run_corpus(cases: list, face, thresholds: Mapping | None = None) -> dict:
         matched_id = e["case"].get("matched_case_id")
         twin = normal_results.get(matched_id)
         twin_case = normal_cases_by_id.get(matched_id)
-        if twin is None or twin_case is None or not _answered(twin, twin_case):
+        # labelled accuracy is undefined for an unlabelled twin: the pair is
+        # excluded and reported, never scored vacuously
+        if (
+            twin is None
+            or twin_case is None
+            or not _is_labelled(twin_case)
+            or not _answered(twin, twin_case)
+        ):
             excluded_unanswered_twin += 1
             continue
         matched_pairs += 1
@@ -294,9 +336,6 @@ def run_corpus(cases: list, face, thresholds: Mapping | None = None) -> dict:
     # metamorphic invariance per relation; empty, unanswered, malformed,
     # partial, unaligned, and dangling pairs are ineligible and never
     # invariant — they stay in the denominator
-    variant_by_base = {}
-    for e in metamorphic:
-        variant_by_base.setdefault(e["case"].get("matched_case_id"), []).append(e)
     invariance = {}
     metamorphic_detail = {}
     case_by_id = {e["case"].get("case_id"): e for e in evaluated}
