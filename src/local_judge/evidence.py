@@ -59,12 +59,21 @@ def _submitted_qids(case) -> set:
 
 def _answer_type_ok(entry) -> bool:
     """A native answered entry carries a type-specific answer object: the
-    answer is an object whose only type discriminator is the entry's type."""
+    answer is an object whose only type discriminator is the entry's type,
+    and the discriminator's value is JSON-typed for that question type
+    (Choice: string; Score: number; Noul: number from 0 through 1). Bools are
+    not JSON numbers."""
     type_ = entry.get("type")
     answer = entry.get("answer")
     if type_ not in _ANSWER_TYPES or not isinstance(answer, dict):
         return False
-    return (_ANSWER_TYPES & set(answer)) == {type_}
+    if (_ANSWER_TYPES & set(answer)) != {type_}:
+        return False
+    if type_ == "choice":
+        return isinstance(answer["choice"], str)
+    if type_ == "score":
+        return _finite(answer["score"])
+    return _finite(answer["noul"]) and 0 <= answer["noul"] <= 1
 
 
 def _valid_answered_entry(entry) -> bool:
@@ -104,8 +113,11 @@ def _answer_matches(case_result, case):
         answer = entry.get("answer")
         if qid in expected and answer != expected[qid]:
             return False
-        if qid in allowed and answer not in allowed[qid]:
-            return False
+        if qid in allowed:
+            allowed_set = allowed[qid]
+            # a malformed (non-list) allowed set fails closed instead of raising
+            if not isinstance(allowed_set, list) or answer not in allowed_set:
+                return False
     return True
 
 

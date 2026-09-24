@@ -989,3 +989,45 @@ def test_expected_error_code_rejects_a_completed_response():
     report = run_corpus([case], canned_face({"det-adapter-1": completed_with_error}))
     det_gate = next(g for g in report["gates"] if g["gate"] == "deterministic_fixtures")
     assert det_gate["pass"] is False
+
+
+def test_boolean_answer_values_are_not_type_valid():
+    """Bool is not a JSON number: a scripted True must not satisfy a score
+    expectation of 1, and must not count as a valid answered entry."""
+    labelled = {
+        "case_id": "normal-bool", "case_class": "normal", "state": {"ticket": "?"},
+        "policy": "p1", "question_id": "severity",
+        "questions": [{"type": "score", "instructions": "i",
+                       "criteria": ["a", "b", "c"]}],
+        "expected_answer": {"severity": {"score": 1, "legend": {}, "vote_share": {}}},
+        "model_outputs": ["1"], "rationale": "bool attack",
+    }
+    bool_entry = dict(ANSWERED_ENTRY, type="score", answer={"score": True, "legend": {}, "vote_share": {}})
+    report = run_corpus([labelled], canned_face({"normal-bool": completed(bool_entry, qid="severity")}))
+    assert report["metrics"]["accuracy"]["answered"] == 0, "bool must not be a valid answered entry"
+
+    noul_entry = dict(ANSWERED_ENTRY, type="noul", answer={"noul": True})
+    noul_case = dict(labelled, case_id="normal-bool-noul", question_id="is_refund",
+                     expected_answer={"is_refund": {"noul": 1}})
+    report2 = run_corpus([noul_case], canned_face(
+        {"normal-bool-noul": completed(noul_entry, qid="is_refund")}))
+    assert report2["metrics"]["accuracy"]["answered"] == 0
+
+    out_of_range = dict(ANSWERED_ENTRY, type="noul", answer={"noul": 1.5})
+    report3 = run_corpus([noul_case], canned_face(
+        {"normal-bool-noul": completed(out_of_range, qid="is_refund")}))
+    assert report3["metrics"]["accuracy"]["answered"] == 0, "noul outside [0, 1] is not type-valid"
+
+
+def test_non_list_allowed_answers_fail_closed():
+    """A malformed (non-list) allowed set must fail the match, not raise."""
+    ambiguous = {
+        "case_id": "amb-str", "case_class": "ambiguous", "state": {"ticket": "?"},
+        "policy": "p1", "question_id": "department",
+        "questions": [{"type": "choice", "instructions": "i",
+                       "criteria": {"billing": "b", "technical": "t"}}],
+        "allowed_answers": {"department": "billing"},
+        "model_outputs": ['"billing"'], "rationale": "allowed set is a string",
+    }
+    report = run_corpus([ambiguous], canned_face({"amb-str": completed(ANSWERED_ENTRY)}))
+    assert report["metrics"]["allowed_outcome_coverage"]["in_allowed_set"] == 0
