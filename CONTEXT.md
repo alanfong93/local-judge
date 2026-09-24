@@ -13,6 +13,7 @@
 | Trace | The returned replay record of accepted inputs, rendered messages, settings, versions, attempts, validation, and result. | An audit proof |
 | Replay | A new evaluation reconstructed from a trace. It preserves configuration where available but does not promise the same stochastic answer. | Deterministic reproduction |
 | Jev adapter | An explicit conversion between the native contract and the documented Jev-shaped subset. | Full Jev compatibility |
+| Task preservation | Matched adversarial pairs that stayed on task, as a rate over pairs whose matched normal case was answered, and at most 10 percentage points below those twins' labelled accuracy on the same pair set. | Injection resistance or a security proof |
 
 ## Contract Boundary
 
