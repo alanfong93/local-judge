@@ -120,5 +120,10 @@ class UrllibHttpTransport:
             raise TransportUnavailable(str(exc)) from exc
         except TimeoutError:
             raise TransportTimeout("request timed out") from None
+        except ValueError:
+            # Header/URL encoding failures (http.client embeds the offending
+            # header value in its ValueError text); the value must never
+            # travel with the error.
+            raise TransportUnavailable("request could not be encoded or sent") from None
         except (OSError, http.client.HTTPException) as exc:
             raise TransportUnavailable(str(exc)) from exc

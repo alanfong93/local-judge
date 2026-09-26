@@ -71,6 +71,8 @@ class OpenAICompatibleProfile:
             not isinstance(self.api_key, str) or not self.api_key.strip()
         ):
             raise ValueError("endpoint API key must be a nonempty string or null")
+        if self.api_key is not None and self.api_key != self.api_key.strip():
+            raise ValueError("endpoint API key must not have leading or trailing whitespace")
         if self.api_key is not None and (
             any(ord(ch) < 32 or ord(ch) == 127 for ch in self.api_key)
             or not self.api_key.isascii()
@@ -173,7 +175,7 @@ class OpenAICompatibleModelPort:
         if response.status_code != 200:
             body = response.body or ""
             if response.status_code == 413 or (
-                response.status_code == 400
+                response.status_code in (400, 422)
                 and any(marker in body.lower() for marker in _CONTEXT_MARKERS)
             ):
                 return RawAttempt(outcome=TransportOutcome.CONTEXT_OVERFLOW, output=None)

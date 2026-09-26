@@ -152,7 +152,7 @@ the model's output but never replaces local validation.
 Transport failures map to the contract through the shared port outcomes: a
 deadline miss or an HTTP 408/504 becomes `MODEL_TIMEOUT`; an unreachable
 endpoint or any other non-200 status becomes `MODEL_UNAVAILABLE`, except
-HTTP 413, or a recognized context-limit body on HTTP 400, which becomes
+HTTP 413, or a recognized context-limit body on HTTP 400 or 422, which becomes
 `CONTEXT_LIMIT_EXCEEDED` — other statuses stay `MODEL_UNAVAILABLE` even when
 their bodies mention limits; a 200 response whose body is not a parseable chat
 completion with a string message content becomes `INVALID_MODEL_OUTPUT`. The

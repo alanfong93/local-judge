@@ -181,6 +181,8 @@ def test_api_key_is_not_in_profile_repr():
 @pytest.mark.parametrize(
     "api_key",
     [
+        " token-padded",
+        "token-padded ",
         "token\nwith-newline",
         "token\rreturn",
         "token\x00null",
@@ -195,6 +197,22 @@ def test_api_key_control_or_non_ascii_characters_are_rejected(api_key):
         OpenAICompatibleProfile(
             name="model", base_url="http://localhost:3040/api", api_key=api_key
         )
+
+
+def test_transport_header_encoding_failure_never_carries_the_value():
+    from local_judge.http_transport import UrllibHttpTransport, TransportUnavailable
+
+    transport = UrllibHttpTransport()
+    with pytest.raises(TransportUnavailable) as excinfo:
+        transport.post(
+            "http://localhost:3040/api/chat/completions",
+            {},
+            1000,
+            headers={"Authorization": "Bearer leak-me\nsecond-line"},
+        )
+    assert "leak-me" not in str(excinfo.value)
+    assert "second-line" not in str(excinfo.value)
+    assert excinfo.value.__cause__ is None and excinfo.value.__suppress_context__
 
 
 def test_api_key_is_carried_only_in_headers_never_in_payload():
@@ -259,8 +277,11 @@ def test_transport_failures_become_explicit_outcomes(transport_exc, outcome):
         (504, "gateway timeout", TransportOutcome.TIMEOUT),
         (413, "request too large", TransportOutcome.CONTEXT_OVERFLOW),
         (400, "maximum context length exceeded", TransportOutcome.CONTEXT_OVERFLOW),
+        (422, "maximum context length is 8192 tokens", TransportOutcome.CONTEXT_OVERFLOW),
+        (422, "unprocessable field", TransportOutcome.UNAVAILABLE),
         (401, "unauthorized", TransportOutcome.UNAVAILABLE),
         (401, "you have exceeded your token limit", TransportOutcome.UNAVAILABLE),
+        (429, "rate limit: tokens per minute exceeded", TransportOutcome.UNAVAILABLE),
         (500, "context length exceeded upstream", TransportOutcome.UNAVAILABLE),
     ],
 )
