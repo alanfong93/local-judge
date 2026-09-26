@@ -5,6 +5,7 @@ access. Public surface only; internal modules may change.
 """
 
 from local_judge.errors import ErrorObject, StructuralCode, StructuralError
+from local_judge.endpoint import OpenAICompatibleModelPort, OpenAICompatibleProfile
 from local_judge.models import (
     AttemptRecord,
     CompletedResponse,
@@ -17,6 +18,7 @@ from local_judge.models import (
     ResultStatus,
     TraceRecord,
 )
+from local_judge.ports import ModelPort
 from local_judge.validation import ModelProfile, RequestValidator
 
 __all__ = [
@@ -25,6 +27,9 @@ __all__ = [
     "ErrorObject",
     "Inference",
     "ModelProfile",
+    "ModelPort",
+    "OpenAICompatibleModelPort",
+    "OpenAICompatibleProfile",
     "Policy",
     "QuestionEntry",
     "RequestEnvelope",

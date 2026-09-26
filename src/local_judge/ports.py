@@ -31,8 +31,8 @@ class RawAttempt:
 
 
 @runtime_checkable
-class LocalModelPort(Protocol):
-    """Raw single-attempt port over a configured local model profile."""
+class ModelPort(Protocol):
+    """Raw single-attempt port over a configured inference model profile."""
 
     def attempt(
         self,
@@ -41,3 +41,7 @@ class LocalModelPort(Protocol):
         inference: Inference,
         response_schema: Mapping[str, Any] | None = None,
     ) -> RawAttempt: ...
+
+
+# Compatibility name retained for callers of the original Ollama-only API.
+LocalModelPort = ModelPort
