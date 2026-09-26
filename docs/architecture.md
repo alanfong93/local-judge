@@ -10,12 +10,18 @@ flowchart LR
     HTTP --> LIB
     MCP --> LIB
     LIB --> CORE["Validated local-judge core"]
-    CORE --> OLLAMA["Configured local Ollama profile"]
+    CORE --> PORT["Configured model port"]
+    PORT --> OLLAMA["Ollama adapter<br>literal loopback only"]
+    PORT --> ENDPOINT["OpenAI-compatible adapter<br>configured chat endpoint"]
 ```
 
 FastAPI and FastMCP are thin, independently runnable access adapters. The
-importable library is the only route to the core; adapters do not interpret
-question types, aggregate samples, or create alternate trace behavior.
+importable library is the only route to the core; access adapters do not
+interpret question types, aggregate samples, or create alternate trace
+behavior. The model port is injected into the shared orchestrator. Ollama
+profiles remain loopback-only; the OpenAI-compatible adapter uses an
+operator-configured endpoint such as Open WebUI's `/api/chat/completions`.
+Endpoint configuration is deployment-owned and never comes from a request.
 
 ## Boundary Rules
 
@@ -31,3 +37,6 @@ question types, aggregate samples, or create alternate trace behavior.
   plus the documented `local_judge` extension containing native traces.
 - HTTP binds locally by default. v1 has no authentication, multi-tenancy, or
   persistent storage.
+- The endpoint adapter uses a configured base URL, optional bearer API key,
+  non-streaming chat completions, and a bounded timeout. The endpoint may be
+  local or remote; data locality and provider charges depend on that service.

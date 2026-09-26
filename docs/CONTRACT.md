@@ -9,7 +9,8 @@ an HTTP endpoint, MCP tool, or Python package.
 ## Scope
 
 Native v1 evaluates a shared state against a nonempty map of independent
-Choice, Score, and Noul questions using a selected local model. It provides
+Choice, Score, and Noul questions using a selected configured model profile.
+It provides
 typed answers, empirical repeated-sample agreement, per-question failure
 reporting, and an inline trace for replay.
 
@@ -82,7 +83,7 @@ error.
 | --- | --- |
 | `contract_version` | Required and exactly `v1`. |
 | `state` | Required `JSONContent`. The envelope validates its outer JSON type but does not interpret nested fields as contract fields. |
-| `model` | Required nonempty string naming a local model profile. |
+| `model` | Required nonempty string naming a configured model profile. |
 | `policy` | Required closed object with required nonempty `version`. The version is caller-declared and is not checked against a registry. |
 | `inference` | Required closed object. Omitted optional fields use the defaults below. |
 | `questions` | Required nonempty map from nonempty unique IDs to question objects. A question ID is a correlation key and is never rendered into the model prompt. |
@@ -100,6 +101,70 @@ The encoded request must not exceed 256 KiB. A request may contain at most 64
 questions. A question whose rendered state and policy exceed the selected
 model's context limit receives `CONTEXT_LIMIT_EXCEEDED`; valid sibling
 questions still run.
+
+## Model Providers
+
+The `model` field selects one deployment-configured profile by its model ID.
+Profiles are deployment-owned configuration with two kinds: the local Ollama
+adapter, whose base URL must be a literal loopback address, and
+OpenAI-compatible endpoint adapters speaking the standard non-streaming
+chat-completions shape. The endpoint URL, API key, and model ID never come
+from request data, and request data cannot add, replace, or reconfigure a
+profile.
+
+An OpenAI-compatible endpoint profile has this published Python shape and
+these deployment-owned fields:
+
+```python
+OpenAICompatibleProfile(
+    name,                          # model ID sent to the endpoint; what requests select
+    base_url,                      # exact chat-completions API prefix, http(s)
+    api_key=None,                  # optional bearer token
+    response_format="json_schema", # or "json_object"
+    supported_inference_settings=frozenset({"sample_count", "temperature", "timeout_ms"}),
+)
+```
+
+| Field | Rule |
+| --- | --- |
+| `name` | Required nonempty string. It is the model identifier sent in the request and the ID that selects the profile. |
+| `base_url` | Required http(s) URL without credentials, query, or fragment. It is the API prefix exactly as configured. |
+| `api_key` | Optional nonempty bearer token. When set it is sent only as the `Authorization: Bearer` header and never appears in reprs, results, traces, logs, or errors. |
+| `response_format` | `json_schema` (default) or `json_object`, chosen explicitly by configuration. The adapter never silently downgrades one mode to the other. |
+| `supported_inference_settings` | Declared capabilities. `temperature` must be declared. `seed` is sent only when declared; otherwise the request is rejected with `UNSUPPORTED_INFERENCE_SETTING` before any network I/O. |
+
+URL joining is exact: trailing slashes are removed from `base_url` and
+`/chat/completions` is appended, nothing more. Open WebUI is configured with
+its `/api` prefix, yielding `/api/chat/completions`; conventional
+OpenAI-compatible providers use their `/v1` prefix; a bare host is valid only
+when its route is exactly `/chat/completions`. The adapter never infers or
+appends a version segment.
+
+Each attempt makes exactly one non-streaming chat-completions request over
+the shared bounded HTTP transport — no retry, no redirect following — bounded
+by the request's `timeout_ms`. The adapter always passes `temperature` and
+passes `seed` only when declared. When a sample-output schema is supplied, it
+is sent according to the profile's `response_format` mode (`json_schema`
+carries the schema; `json_object` requests JSON mode without it). Local
+typed-output validation remains authoritative: a response format constrains
+the model's output but never replaces local validation.
+
+Transport failures map to the contract through the shared port outcomes: a
+deadline miss or an HTTP 408/504 becomes `MODEL_TIMEOUT`; an unreachable
+endpoint or any other non-200 status becomes `MODEL_UNAVAILABLE`, except
+HTTP 413, or a recognized context-limit body on HTTP 400 or 422, which becomes
+`CONTEXT_LIMIT_EXCEEDED` — other statuses stay `MODEL_UNAVAILABLE` even when
+their bodies mention limits; a 200 response whose body is not a parseable chat
+completion with a string message content becomes `INVALID_MODEL_OUTPUT`. The
+adapter returns only the extracted completion text and never an upstream
+response body, and the API key never enters results, traces, logs, or errors.
+
+The Ollama adapter is unchanged: loopback-only literal addresses, never DNS
+names, so the local-data guarantee holds by construction. A configured
+endpoint may be local or remote; it may receive the supplied state, policy,
+and rendered prompt, and it may charge for inference. Selecting one is a
+deployment decision, disclosed in the README and product docs, never a
+request decision.
 
 ## Policy and Prompt Boundary
 
@@ -238,7 +303,7 @@ model output, or prompt content.
 | `DUPLICATE_QUESTION_ID` | The raw JSON contains the same question key more than once. |
 | `REQUEST_TOO_LARGE` | The encoded request exceeds 256 KiB or has more than 64 questions. |
 | `UNSUPPORTED_INFERENCE_SETTING` | The selected profile cannot honor a supplied inference setting such as `seed`. |
-| `UNSUPPORTED_LOCAL_MODEL` | The requested model is not a configured local profile. |
+| `UNSUPPORTED_LOCAL_MODEL` | The requested model is not a configured model profile. |
 
 ### Question Isolation
 
@@ -411,8 +476,8 @@ The adapter is intentionally narrower than the native contract.
 
 It accepts the documented Jev-shaped input map on every supported access face.
 The input map is a closed object with exactly the fields `state` (required
-`JSONContent`), `model` (required nonempty string naming a configured local
-model profile), and `questions` (required nonempty map of typed questions); it
+`JSONContent`), `model` (required nonempty string naming a configured model
+profile), and `questions` (required nonempty map of typed questions); it
 has no `policy` or `inference` input because the adapter supplies those from
 its own defaults. The adapter validates the input with the same structural
 rules and codes as the native envelope before any conversion or model call. An
@@ -457,7 +522,7 @@ native error object with `JEV_ADAPTER_UNMAPPABLE_RESULT`.
    profile says otherwise. A profile may not set `sample_count` below 2:
    agreement is null at one sample, and the adapter refuses results that lack
    agreement.
-2. The Jev-shaped `model` field names a configured local model profile. Hosted
+2. The Jev-shaped `model` field names a configured model profile. Hosted
    Jev aliases such as `jev-latest` are rejected with
    `UNSUPPORTED_LOCAL_MODEL`; the adapter never forwards an evaluation to
    TypeSafe.
