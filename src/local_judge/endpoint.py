@@ -71,6 +71,14 @@ class OpenAICompatibleProfile:
             not isinstance(self.api_key, str) or not self.api_key.strip()
         ):
             raise ValueError("endpoint API key must be a nonempty string or null")
+        if self.api_key is not None and (
+            any(ord(ch) < 32 or ord(ch) == 127 for ch in self.api_key)
+            or not self.api_key.isascii()
+        ):
+            # http.client would reject these at putheader time with the header
+            # value embedded in the exception text — the key must never be able
+            # to reach an error message.
+            raise ValueError("endpoint API key must be printable ASCII without control characters")
         if self.response_format not in ("json_schema", "json_object"):
             raise ValueError("response_format must be 'json_schema' or 'json_object'")
         if not isinstance(self.supported_inference_settings, frozenset):
@@ -164,7 +172,10 @@ class OpenAICompatibleModelPort:
             return RawAttempt(outcome=TransportOutcome.TIMEOUT, output=None)
         if response.status_code != 200:
             body = response.body or ""
-            if response.status_code == 413 or any(marker in body.lower() for marker in _CONTEXT_MARKERS):
+            if response.status_code == 413 or (
+                response.status_code == 400
+                and any(marker in body.lower() for marker in _CONTEXT_MARKERS)
+            ):
                 return RawAttempt(outcome=TransportOutcome.CONTEXT_OVERFLOW, output=None)
             return RawAttempt(outcome=TransportOutcome.UNAVAILABLE, output=None)
 

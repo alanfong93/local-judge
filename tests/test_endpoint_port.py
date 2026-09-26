@@ -179,6 +179,65 @@ def test_api_key_is_not_in_profile_repr():
 
 
 @pytest.mark.parametrize(
+    "api_key",
+    [
+        "token\nwith-newline",
+        "token\rreturn",
+        "token\x00null",
+        "token\x1bescape",
+        "tokén-unicode",
+    ],
+)
+def test_api_key_control_or_non_ascii_characters_are_rejected(api_key):
+    # http.client rejects such keys at putheader time with the header value
+    # embedded in the exception text; the key must never reach an error message.
+    with pytest.raises(ValueError):
+        OpenAICompatibleProfile(
+            name="model", base_url="http://localhost:3040/api", api_key=api_key
+        )
+
+
+def test_api_key_is_carried_only_in_headers_never_in_payload():
+    fake = FakeTransport([success("{}")])
+    profile = OpenAICompatibleProfile(
+        name="model", base_url="http://localhost:3040/api", api_key="secret-token"
+    )
+    OpenAICompatibleModelPort({profile.name: profile}, transport=fake).attempt(
+        profile.name, MESSAGES, Inference(), response_schema=SCHEMA
+    )
+
+    payload_json = json.dumps(fake.calls[0]["payload"])
+    assert "secret-token" not in payload_json
+    assert "Authorization" not in payload_json
+    assert fake.calls[0]["headers"] == {"Authorization": "Bearer secret-token"}
+
+
+def test_environment_proxies_are_opt_in(monkeypatch):
+    import urllib.request
+
+    from local_judge.http_transport import UrllibHttpTransport
+
+    monkeypatch.setattr(
+        urllib.request,
+        "getproxies",
+        lambda: {"http": "http://proxy.example.test:3128"},
+    )
+
+    def proxy_handlers(transport):
+        return [
+            h
+            for h in transport._opener.handlers
+            if isinstance(h, urllib.request.ProxyHandler)
+        ]
+
+    # An empty ProxyHandler contributes no <scheme>_open methods, so urllib's
+    # add_handler registers nothing: the default transport goes direct.
+    assert proxy_handlers(UrllibHttpTransport()) == []
+    opted_in = proxy_handlers(UrllibHttpTransport(use_environment_proxies=True))
+    assert [h.proxies for h in opted_in] == [{"http": "http://proxy.example.test:3128"}]
+
+
+@pytest.mark.parametrize(
     ("transport_exc", "outcome"),
     [
         (TransportTimeout("deadline"), TransportOutcome.TIMEOUT),
@@ -201,6 +260,8 @@ def test_transport_failures_become_explicit_outcomes(transport_exc, outcome):
         (413, "request too large", TransportOutcome.CONTEXT_OVERFLOW),
         (400, "maximum context length exceeded", TransportOutcome.CONTEXT_OVERFLOW),
         (401, "unauthorized", TransportOutcome.UNAVAILABLE),
+        (401, "you have exceeded your token limit", TransportOutcome.UNAVAILABLE),
+        (500, "context length exceeded upstream", TransportOutcome.UNAVAILABLE),
     ],
 )
 def test_endpoint_http_failures_map_to_transport_outcomes(status, body, outcome):
