@@ -74,4 +74,4 @@ local-judge is an independent implementation of a public request/response shape,
 
 ## Licence
 
-Not yet chosen.
+This project is licensed under the [Apache License 2.0](LICENSE).
