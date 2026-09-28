@@ -2,7 +2,12 @@
 
 ```mermaid
 flowchart TD
-    R["Native or Jev request"] --> A["Access adapter"]
+    D{"Container command"} -->|http| H["FastAPI HTTP mode"]
+    D -->|mcp| M["FastMCP stdio mode"]
+    H --> A["Shared deployment handlers"]
+    M --> A
+    C0["Validate deployment config<br>endpoint + model allowlist"] --> D
+    R["Native or Jev request"] --> A
     A --> V{"Closed envelope valid?"}
     V -- No --> RJ["Rejected result with structural error"]
     V -- Yes --> Q["Core isolates each question"]

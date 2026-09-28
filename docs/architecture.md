@@ -4,15 +4,16 @@
 
 ```mermaid
 flowchart LR
-    N8N["n8n workflow"] --> HTTP["FastAPI HTTP adapter"]
-    AGENT["MCP client"] --> MCP["FastMCP stdio adapter"]
+    N8N["n8n container"] -->|host port 8000| HTTP["local-judge image<br>HTTP mode"]
+    AGENT["MCP host"] -->|docker run -i / stdio| MCP["local-judge image<br>MCP mode"]
     PY["Python consumer"] --> LIB["Importable Python library"]
-    HTTP --> LIB
-    MCP --> LIB
-    LIB --> CORE["Validated local-judge core"]
+    HTTP --> CORE["Shared deployment handlers and validated core"]
+    MCP --> CORE
+    LIB --> CORE
     CORE --> PORT["Configured model port"]
     PORT --> OLLAMA["Ollama adapter<br>literal loopback only"]
     PORT --> ENDPOINT["OpenAI-compatible adapter<br>configured chat endpoint"]
+    ENDPOINT -->|host.docker.internal:3040| WEBUI["External Open WebUI container"]
 ```
 
 FastAPI and FastMCP are thin, independently runnable access adapters. The
@@ -22,6 +23,12 @@ behavior. The model port is injected into the shared orchestrator. Ollama
 profiles remain loopback-only; the OpenAI-compatible adapter uses an
 operator-configured endpoint such as Open WebUI's `/api/chat/completions`.
 Endpoint configuration is deployment-owned and never comes from a request.
+The Docker image's HTTP command composes handlers from environment settings;
+its stdio command composes the same handlers for FastMCP. Compose uses the
+default container network and a host-published Open WebUI port, not an external
+network join. The HTTP host port is intentionally published on all interfaces;
+it has no authentication and is intended only for the accepted local LAN
+deployment.
 
 ## Boundary Rules
 
@@ -35,8 +42,10 @@ Endpoint configuration is deployment-owned and never comes from a request.
   validates its closed three-field input with the native structural rules
   before conversion. It returns Jev-shaped `answers`
   plus the documented `local_judge` extension containing native traces.
-- HTTP binds locally by default. v1 has no authentication, multi-tenancy, or
-  persistent storage.
+- The Python `api.serve()` helper binds to loopback by default. The container
+  entrypoint binds internally to `0.0.0.0:8000` and Compose publishes the host
+  port on all interfaces as an explicit deployment choice. v1 has no HTTP
+  authentication, multi-tenancy, or persistent storage.
 - The endpoint adapter uses a configured base URL, optional bearer API key,
   non-streaming chat completions, and a bounded timeout. The endpoint may be
   local or remote; data locality and provider charges depend on that service.
