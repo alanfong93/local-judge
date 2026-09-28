@@ -51,27 +51,13 @@ class _ParsedJSONDict(dict):
         self.duplicate_keys = frozenset(duplicates)
 
 
-def _has_nested_duplicate_members(document: Any) -> bool:
-    pending = [(document, True)]
-    while pending:
-        value, is_root = pending.pop()
-        if isinstance(value, _ParsedJSONDict):
-            if not is_root and value.duplicate_keys:
-                return True
-            pending.extend((item, False) for item in value.values())
-        elif isinstance(value, list):
-            pending.extend((item, False) for item in value)
-    return False
-
-
 def _strict_json_loads(raw: bytes, *, allow_root_duplicates: bool = False) -> Any:
+    """Parse JSON into mappings that retain duplicate-name evidence."""
     document = json.loads(
         raw,
         object_pairs_hook=_ParsedJSONDict,
         parse_constant=_no_non_json_constant,
     )
-    if _has_nested_duplicate_members(document):
-        raise ValueError("duplicate JSON object member")
     if (
         not allow_root_duplicates
         and isinstance(document, _ParsedJSONDict)
@@ -297,6 +283,14 @@ class DeploymentRuntime:
                 code=StructuralCode.INVALID_FIELD,
                 path=f"/{escaped}",
                 message=f"duplicate top-level field: {field_name!r}",
+            )
+            return 400, {"answers": None, "local_judge": None, "error": error.to_dict()}
+        questions = jev_input.get("questions")
+        if isinstance(questions, _ParsedJSONDict) and questions.duplicate_keys:
+            error = ErrorObject(
+                code=StructuralCode.DUPLICATE_QUESTION_ID,
+                path="",
+                message="duplicate question ID in raw JSON",
             )
             return 400, {"answers": None, "local_judge": None, "error": error.to_dict()}
         result = self.adapter.evaluate(jev_input, self._run_envelope)

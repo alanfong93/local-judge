@@ -497,7 +497,10 @@ the input has no `contract_version`, `policy`, or `inference`, the codes that
 concern `contract_version`, `policy`, and most inference settings cannot fire
 on this face; the reachable structural codes here are `MALFORMED_JSON`,
 `MISSING_FIELD`, `UNKNOWN_FIELD`, `INVALID_FIELD`, `INVALID_QUESTIONS_MAP`,
-`UNSUPPORTED_LOCAL_MODEL`, and `REQUEST_TOO_LARGE`.
+`DUPLICATE_QUESTION_ID`, `UNSUPPORTED_LOCAL_MODEL`, and `REQUEST_TOO_LARGE`.
+Duplicate IDs in the raw `questions` object use `DUPLICATE_QUESTION_ID`;
+repeated members inside opaque state or an individual question retain the
+native last-value/per-question semantics.
 
 Its result is a closed adapter object with three fields:
 

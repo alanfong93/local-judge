@@ -339,6 +339,89 @@ def test_replay_handler_rejects_duplicate_top_level_fields_with_native_code():
     validate_against(result, "#/$defs/rejectedResponse")
 
 
+def test_jev_nested_state_duplicates_follow_native_last_value_semantics():
+    port = ScriptedPort(['"billing"'] * 8)
+    runtime = deployment_runtime(port)
+    state = b'{"ticket":"first","ticket":"last"}'
+    question = json.dumps(CHOICE, separators=(",", ":")).encode("utf-8")
+    native = (
+        b'{"contract_version":"v1","state":'
+        + state
+        + b',"model":"qwen3.5:8b","policy":{"version":"p"},'
+        + b'"inference":{},"questions":{"q":'
+        + question
+        + b'}}'
+    )
+    jev = (
+        b'{"state":'
+        + state
+        + b',"model":"qwen3.5:8b","questions":{"q":'
+        + question
+        + b'}}'
+    )
+
+    native_status, native_result = runtime.native_evaluator(native)
+    jev_status, jev_result = runtime.jev_evaluator(jev)
+
+    assert native_status == 200
+    assert jev_status == 200
+    assert jev_result["error"] is None
+    assert jev_result["answers"]["q"]["choice"] == native_result["results"]["q"]["answer"]["choice"]
+
+
+def test_jev_duplicate_question_members_match_native_last_value_behavior():
+    port = ScriptedPort(['"billing"'] * 8)
+    runtime = deployment_runtime(port)
+    question = (
+        b'{"type":"choice","instructions":"first","instructions":"last",'
+        b'"criteria":{"billing":"p","technical":"b"}}'
+    )
+    native = (
+        b'{"contract_version":"v1","state":"smoke","model":"qwen3.5:8b",'
+        b'"policy":{"version":"p"},"inference":{},"questions":{"q":'
+        + question
+        + b'}}'
+    )
+    jev = (
+        b'{"state":"smoke","model":"qwen3.5:8b","questions":{"q":'
+        + question
+        + b'}}'
+    )
+
+    native_status, native_result = runtime.native_evaluator(native)
+    jev_status, jev_result = runtime.jev_evaluator(jev)
+
+    assert native_status == 200
+    assert jev_status == 200
+    assert jev_result["error"] is None
+    assert jev_result["answers"]["q"]["choice"] == native_result["results"]["q"]["answer"]["choice"]
+
+
+def test_jev_duplicate_question_ids_use_the_native_structural_code():
+    port = ScriptedPort([])
+    runtime = deployment_runtime(port)
+    question = json.dumps(CHOICE, separators=(",", ":")).encode("utf-8")
+    questions = b'{"q":' + question + b',"q":' + question + b'}'
+    native = (
+        b'{"contract_version":"v1","state":"smoke","model":"qwen3.5:8b",'
+        b'"policy":{"version":"p"},"inference":{},"questions":'
+        + questions
+        + b'}'
+    )
+    jev = b'{"state":"smoke","model":"qwen3.5:8b","questions":' + questions + b'}'
+
+    native_status, native_result = runtime.native_evaluator(native)
+    jev_status, jev_result = runtime.jev_evaluator(jev)
+
+    assert native_status == 400
+    assert jev_status == 400
+    assert native_result["error"]["code"] == "DUPLICATE_QUESTION_ID"
+    assert jev_result["error"]["code"] == native_result["error"]["code"]
+    assert jev_result["error"]["path"] == native_result["error"]["path"] == ""
+    assert port.calls == []
+    validate_against(jev_result, "#/$defs/jevAdapterResult")
+
+
 @given(depth=st.integers(min_value=1100, max_value=1600))
 def test_deep_native_and_jev_states_fail_with_structured_rejections(depth):
     port = ScriptedPort([])

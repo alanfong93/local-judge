@@ -1395,6 +1395,7 @@
                             "UNKNOWN_FIELD",
                             "INVALID_FIELD",
                             "INVALID_QUESTIONS_MAP",
+                            "DUPLICATE_QUESTION_ID",
                             "UNSUPPORTED_LOCAL_MODEL"
                           ]
                         }
