@@ -36,21 +36,49 @@ def _no_non_json_constant(value: str) -> None:
     raise ValueError(f"{value} is not a JSON value")
 
 
-def _unique_json_object(pairs: list[tuple[str, Any]]) -> dict:
-    result = {}
-    for key, value in pairs:
-        if key in result:
-            raise ValueError("duplicate JSON object member")
-        result[key] = value
-    return result
+class _ParsedJSONDict(dict):
+    """JSON object preserving duplicate names for the enclosing contract parser."""
+
+    def __init__(self, pairs: list[tuple[str, Any]]) -> None:
+        super().__init__()
+        seen: set[str] = set()
+        duplicates: set[str] = set()
+        for key, value in pairs:
+            if key in seen:
+                duplicates.add(key)
+            seen.add(key)
+            self[key] = value
+        self.duplicate_keys = frozenset(duplicates)
 
 
-def _strict_json_loads(raw: bytes) -> Any:
-    return json.loads(
+def _has_nested_duplicate_members(document: Any) -> bool:
+    pending = [(document, True)]
+    while pending:
+        value, is_root = pending.pop()
+        if isinstance(value, _ParsedJSONDict):
+            if not is_root and value.duplicate_keys:
+                return True
+            pending.extend((item, False) for item in value.values())
+        elif isinstance(value, list):
+            pending.extend((item, False) for item in value)
+    return False
+
+
+def _strict_json_loads(raw: bytes, *, allow_root_duplicates: bool = False) -> Any:
+    document = json.loads(
         raw,
-        object_pairs_hook=_unique_json_object,
+        object_pairs_hook=_ParsedJSONDict,
         parse_constant=_no_non_json_constant,
     )
+    if _has_nested_duplicate_members(document):
+        raise ValueError("duplicate JSON object member")
+    if (
+        not allow_root_duplicates
+        and isinstance(document, _ParsedJSONDict)
+        and document.duplicate_keys
+    ):
+        raise ValueError("duplicate JSON object member")
+    return document
 
 
 class DeploymentConfigurationError(ValueError):
@@ -199,7 +227,7 @@ class DeploymentRuntime:
     def _rejection_identifiers(raw: bytes) -> tuple[str | None, str | None]:
         try:
             document = _strict_json_loads(raw)
-        except (TypeError, ValueError):
+        except (RecursionError, TypeError, ValueError):
             return None, None
         if not isinstance(document, dict):
             return None, None
@@ -216,7 +244,10 @@ class DeploymentRuntime:
         return 400
 
     def _native_rejection(self, raw: bytes, error: ErrorObject) -> tuple[int, dict]:
-        contract_version, model = self._rejection_identifiers(raw)
+        if error.code == StructuralCode.REQUEST_TOO_LARGE and len(raw) > MAX_ENCODED_BYTES:
+            contract_version, model = None, None
+        else:
+            contract_version, model = self._rejection_identifiers(raw)
         return self._structural_status(raw, error), RejectionResponse(
             contract_version=contract_version,
             model=model,
@@ -236,9 +267,16 @@ class DeploymentRuntime:
         ).to_dict()
 
     def jev_evaluator(self, raw: bytes) -> tuple[int, dict]:
+        if len(raw) > MAX_ENCODED_BYTES:
+            error = ErrorObject(
+                code=StructuralCode.REQUEST_TOO_LARGE,
+                path="",
+                message="the encoded request exceeds 256 KiB",
+            )
+            return 400, {"answers": None, "local_judge": None, "error": error.to_dict()}
         try:
-            jev_input = _strict_json_loads(raw)
-        except (TypeError, ValueError):
+            jev_input = _strict_json_loads(raw, allow_root_duplicates=True)
+        except (RecursionError, TypeError, ValueError):
             error = ErrorObject(
                 code=StructuralCode.MALFORMED_JSON,
                 path="",
@@ -252,6 +290,15 @@ class DeploymentRuntime:
                 message="the Jev request must be a JSON object",
             )
             return 400, {"answers": None, "local_judge": None, "error": error.to_dict()}
+        if isinstance(jev_input, _ParsedJSONDict) and jev_input.duplicate_keys:
+            field_name = sorted(jev_input.duplicate_keys)[0]
+            escaped = field_name.replace("~", "~0").replace("/", "~1")
+            error = ErrorObject(
+                code=StructuralCode.INVALID_FIELD,
+                path=f"/{escaped}",
+                message=f"duplicate top-level field: {field_name!r}",
+            )
+            return 400, {"answers": None, "local_judge": None, "error": error.to_dict()}
         result = self.adapter.evaluate(jev_input, self._run_envelope)
         return (200 if result["error"] is None else 400), result
 
@@ -262,10 +309,10 @@ class DeploymentRuntime:
                 path="",
                 message="the encoded request exceeds 256 KiB",
             )
-            return 413, RejectionResponse("v1", None, error).to_dict()
+            return 413, RejectionResponse(None, None, error).to_dict()
         try:
-            request = _strict_json_loads(raw)
-        except (TypeError, ValueError):
+            request = _strict_json_loads(raw, allow_root_duplicates=True)
+        except (RecursionError, TypeError, ValueError):
             error = ErrorObject(
                 code=StructuralCode.MALFORMED_JSON,
                 path="",
@@ -279,6 +326,21 @@ class DeploymentRuntime:
                 message="the replay request must be a JSON object",
             )
             return 400, RejectionResponse(None, None, error).to_dict()
+        if isinstance(request, _ParsedJSONDict) and request.duplicate_keys:
+            field_name = sorted(request.duplicate_keys)[0]
+            escaped = field_name.replace("~", "~0").replace("/", "~1")
+            error = ErrorObject(
+                code=StructuralCode.INVALID_FIELD,
+                path=f"/{escaped}",
+                message=f"duplicate top-level replay field: {field_name!r}",
+            )
+            contract_version = (
+                "v1"
+                if "contract_version" not in request.duplicate_keys
+                and request.get("contract_version") == "v1"
+                else None
+            )
+            return 400, RejectionResponse(contract_version, None, error).to_dict()
         unknown = set(request) - {"contract_version", "trace"}
         if unknown:
             field_name = sorted(unknown)[0]
@@ -287,7 +349,9 @@ class DeploymentRuntime:
                 path=f"/{field_name.replace('~', '~0').replace('/', '~1')}",
                 message=f"unknown replay field: {field_name!r}",
             )
-            return 400, RejectionResponse(request.get("contract_version"), None, error).to_dict()
+            return 400, RejectionResponse(
+                self._recognized_contract_version(request), None, error
+            ).to_dict()
         for required in ("contract_version", "trace"):
             if required not in request:
                 error = ErrorObject(
@@ -295,7 +359,9 @@ class DeploymentRuntime:
                     path=f"/{required}",
                     message=f"required replay field is absent: {required!r}",
                 )
-                return 400, RejectionResponse(request.get("contract_version"), None, error).to_dict()
+                return 400, RejectionResponse(
+                    self._recognized_contract_version(request), None, error
+                ).to_dict()
         if request["contract_version"] != "v1":
             error = ErrorObject(
                 code=StructuralCode.UNSUPPORTED_CONTRACT_VERSION,
@@ -369,6 +435,10 @@ class DeploymentRuntime:
             model=envelope.model,
             results=results,
         ).to_dict()
+
+    @staticmethod
+    def _recognized_contract_version(request: Mapping[str, Any]) -> str | None:
+        return "v1" if request.get("contract_version") == "v1" else None
 
     def create_http_app(self):
         return create_app(

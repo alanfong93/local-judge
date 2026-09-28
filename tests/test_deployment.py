@@ -1,11 +1,15 @@
-"""Deployment configuration tests (issue #39, practice:spec-first)."""
+"""Deployment tests for issues #39 and #44 (spec-first and TDD)."""
 
 import json
+from unittest.mock import patch
 
 import pytest
 from hypothesis import given, strategies as st
 
 from fastapi.testclient import TestClient
+from conftest import validate_against
+
+import local_judge.deployment as deployment_module
 
 from local_judge.deployment import (
     DeploymentConfigurationError,
@@ -14,6 +18,7 @@ from local_judge.deployment import (
 )
 from local_judge.endpoint import OpenAICompatibleProfile
 from local_judge.ports import RawAttempt, TransportOutcome
+from local_judge.validation import MAX_ENCODED_BYTES
 
 
 BASE_ENV = {
@@ -220,6 +225,80 @@ def test_runtime_replay_success_links_parent_trace_and_rejects_unknown_versions(
     assert len(port.calls) == previous_calls
 
 
+@given(
+    invalid_version=st.one_of(
+        st.none(),
+        st.booleans(),
+        st.integers(),
+        st.text().filter(lambda value: value != "v1"),
+        st.lists(st.integers()),
+        st.dictionaries(st.text(), st.integers()),
+    )
+)
+def test_replay_structural_rejections_never_echo_invalid_contract_versions(invalid_version):
+    runtime = deployment_runtime(ScriptedPort([]))
+    requests = (
+        ({"contract_version": invalid_version, "trace": {}, "extra": 1}, "UNKNOWN_FIELD"),
+        ({"contract_version": invalid_version}, "MISSING_FIELD"),
+    )
+
+    for request, expected_code in requests:
+        status, payload = runtime.replay_evaluator(json_bytes(request))
+
+        assert status == 400
+        assert payload["contract_version"] is None
+        assert payload["error"]["code"] == expected_code
+        validate_against(payload, "#/$defs/rejectedResponse")
+
+
+def test_oversized_replay_rejection_does_not_claim_a_parsed_contract_version():
+    runtime = deployment_runtime(ScriptedPort([]))
+
+    status, payload = runtime.replay_evaluator(b"x" * (MAX_ENCODED_BYTES + 1))
+
+    assert status == 413
+    assert payload["contract_version"] is None
+    assert payload["error"]["code"] == "REQUEST_TOO_LARGE"
+    validate_against(payload, "#/$defs/rejectedResponse")
+
+
+@given(extra_bytes=st.integers(min_value=1, max_value=64))
+def test_oversized_native_and_jev_bodies_are_rejected_before_json_parsing(
+    extra_bytes,
+):
+    raw = b"x" * (MAX_ENCODED_BYTES + extra_bytes)
+    port = ScriptedPort([])
+    runtime = deployment_runtime(port)
+    strict_parse_lengths = []
+    original_strict_loads = deployment_module._strict_json_loads
+
+    def tracked_strict_loads(body):
+        strict_parse_lengths.append(len(body))
+        return original_strict_loads(body)
+
+    with patch.object(deployment_module, "_strict_json_loads", tracked_strict_loads):
+        jev_status, jev_result = runtime.jev_evaluator(raw)
+
+    assert jev_status == 400
+    assert jev_result["error"]["code"] == "REQUEST_TOO_LARGE"
+    assert strict_parse_lengths == []
+
+    rejection_parse_lengths = []
+    original_identifiers = runtime._rejection_identifiers
+
+    def tracked_rejection_identifiers(body):
+        rejection_parse_lengths.append(len(body))
+        return original_identifiers(body)
+
+    with patch.object(runtime, "_rejection_identifiers", tracked_rejection_identifiers):
+        native_status, native_result = runtime.native_evaluator(raw)
+
+    assert native_status == 413
+    assert native_result["error"]["code"] == "REQUEST_TOO_LARGE"
+    assert rejection_parse_lengths == []
+    assert port.calls == []
+
+
 def test_runtime_jev_maps_results_with_shared_evaluator():
     port = ScriptedPort(['"billing"', '"billing"', '"billing"'])
     runtime = deployment_runtime(port)
@@ -243,7 +322,60 @@ def test_jev_handler_rejects_duplicate_json_members():
         b'{"state":"a","state":"b","model":"qwen3.5:8b","questions":{}}'
     )
     assert status == 400
-    assert result["error"]["code"] == "MALFORMED_JSON"
+    assert result["error"]["code"] == "INVALID_FIELD"
+    assert result["error"]["path"] == "/state"
+
+
+def test_replay_handler_rejects_duplicate_top_level_fields_with_native_code():
+    runtime = deployment_runtime(ScriptedPort([]))
+    status, result = runtime.replay_evaluator(
+        b'{"contract_version":"v1","contract_version":"v1","trace":{}}'
+    )
+
+    assert status == 400
+    assert result["contract_version"] is None
+    assert result["error"]["code"] == "INVALID_FIELD"
+    assert result["error"]["path"] == "/contract_version"
+    validate_against(result, "#/$defs/rejectedResponse")
+
+
+@given(depth=st.integers(min_value=1100, max_value=1600))
+def test_deep_native_and_jev_states_fail_with_structured_rejections(depth):
+    port = ScriptedPort([])
+    runtime = deployment_runtime(port)
+    nested_state = b"[" * depth + b"0" + b"]" * depth
+    question = json.dumps(CHOICE, separators=(",", ":")).encode("utf-8")
+    native = (
+        b'{"contract_version":"v1","state":'
+        + nested_state
+        + b',"model":"qwen3.5:8b","policy":{"version":"p"},'
+        + b'"inference":{},"questions":{"q":'
+        + question
+        + b'}}'
+    )
+    jev = (
+        b'{"state":'
+        + nested_state
+        + b',"model":"qwen3.5:8b","questions":{"q":'
+        + question
+        + b'}}'
+    )
+
+    for handler, raw in (
+        (runtime.native_evaluator, native),
+        (runtime.jev_evaluator, jev),
+    ):
+        try:
+            result = handler(raw)
+        except RecursionError:
+            result = None
+
+        assert result is not None, "parser recursion errors must become structured rejections"
+        status, payload = result
+        assert status == 400
+        assert payload["error"]["code"] == "MALFORMED_JSON"
+
+    assert port.calls == []
 
 
 def test_http_and_mcp_modes_share_the_deployment_handlers():
