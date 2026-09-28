@@ -70,15 +70,19 @@ state; locality and billing depend on the configured service.
 
 ## Run as a container
 
-Copy `.env.example` to `.env`, set the Open WebUI model ID and API key, then
-start the HTTP service:
+Copy `.env.example` to `.env`, set `LOCAL_JUDGE_MODEL_IDS` to the model IDs
+shown by Open WebUI, and set `LOCAL_JUDGE_API_KEY` to an Open WebUI API key.
+Then start the HTTP service:
 
 ```sh
 docker compose up --build
 ```
 
-The service is available on host port 8000. Compose publishes it on all host
-interfaces; the API has no authentication, so use it only on a trusted LAN.
+The HTTP API is available on host port 8000. Compose publishes it on all host
+interfaces and the API has no authentication, so use it only on a trusted LAN.
+Host clients use `http://localhost:8000`; n8n running in Docker can use
+`http://host.docker.internal:8000`.
+
 For an MCP client that launches stdio processes, use the same image and
 configuration:
 

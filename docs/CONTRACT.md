@@ -458,6 +458,14 @@ messages as well as the prompt
 template, output schema, and aggregation artifact versions used to produce
 them.
 
+For an OpenAI-compatible endpoint, `backend` is
+`openai-compatible:<fingerprint>`, where `<fingerprint>` is the lowercase
+SHA-256 of the RFC 8785 canonical JSON object containing exactly the
+trailing-slash-normalized `base_url` and `response_format`. The API key is excluded. Replay requires this fingerprint
+to match the configured profile before making a model call; a changed endpoint
+or response-format mode is unavailable configuration, not an implicit replay
+against the current endpoint.
+
 Replay submits the recorded input and resolved settings as a new evaluation and
 creates a new trace linked to its parent. It must resolve and use the recorded
 prompt-template, output-schema, and aggregation versions, not current

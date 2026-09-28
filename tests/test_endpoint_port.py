@@ -178,6 +178,27 @@ def test_api_key_is_not_in_profile_repr():
     assert "do-not-print-me" not in repr(profile)
 
 
+def test_backend_identity_fingerprints_endpoint_and_format_but_not_api_key():
+    first = OpenAICompatibleProfile(
+        name="model", base_url="http://localhost:3040/api/", api_key="key-a"
+    )
+    same_profile = OpenAICompatibleProfile(
+        name="model", base_url="http://localhost:3040/api", api_key="key-b"
+    )
+    different_endpoint = OpenAICompatibleProfile(
+        name="model", base_url="http://other-host:3040/api", api_key="key-a"
+    )
+    different_format = OpenAICompatibleProfile(
+        name="model",
+        base_url="http://localhost:3040/api",
+        response_format="json_object",
+    )
+
+    assert first.backend_identity == same_profile.backend_identity
+    assert first.backend_identity != different_endpoint.backend_identity
+    assert first.backend_identity != different_format.backend_identity
+
+
 @pytest.mark.parametrize(
     "api_key",
     [

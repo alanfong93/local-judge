@@ -10,6 +10,7 @@ from dataclasses import dataclass, field
 from typing import Any, Literal, Mapping, Sequence
 from urllib.parse import urlparse
 
+from local_judge.canonical import canonical_request_hash
 from local_judge.errors import StructuralCode, StructuralError
 from local_judge.http_transport import (
     HttpPostTransport,
@@ -87,6 +88,15 @@ class OpenAICompatibleProfile:
             raise ValueError("supported_inference_settings must be a frozenset")
         if "temperature" not in self.supported_inference_settings:
             raise ValueError("OpenAI-compatible profiles must support temperature")
+
+    @property
+    def backend_identity(self) -> str:
+        """Stable non-secret backend identity for trace replay resolution."""
+        fingerprint = canonical_request_hash({
+            "base_url": self.base_url.rstrip("/"),
+            "response_format": self.response_format,
+        })
+        return f"openai-compatible:{fingerprint}"
 
 
 class OpenAICompatibleModelPort:

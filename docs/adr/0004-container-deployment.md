@@ -34,9 +34,14 @@ LAN clients.
    host interfaces. This is intentionally unauthenticated and LAN-reachable.
    The standard Python library server remains loopback-only.
 5. Package the current prompt, output-schema, aggregation, and configured
-   model-profile artifacts needed for replay. If the recorded versions are
-   unavailable, return `REPLAY_CONFIGURATION_UNAVAILABLE` before an inference
-   call.
+   model-profile artifacts needed for replay. OpenAI-compatible endpoint
+   profile fingerprints must match the recorded trace. If the recorded
+   versions/profile are unavailable, return
+   `REPLAY_CONFIGURATION_UNAVAILABLE` before an inference call.
+6. Use one compatible dependency set for both modes: FastAPI `>=0.141.1,<1`,
+   Starlette `>=1.0.1,<2`, FastMCP `>=4,<5`, and Uvicorn `>=0.35`. The
+   `dev` and `container` extras use the same FastAPI/Starlette/FastMCP ranges
+   so the container test stage verifies the packaged runtime environment.
 
 ## Alternatives considered
 
