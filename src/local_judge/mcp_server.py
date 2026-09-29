@@ -1,10 +1,13 @@
 """Thin FastMCP stdio server (docs/API_Reference.md 'MCP v1').
 
-Tools take the native/Jev request as a structured object, delegate to the
-same library handlers as the HTTP adapter, and return the typed result object
-as JSON text. Tool-level execution errors are reserved for server startup or
-protocol failure: contract validation and model outcomes arrive as typed
-result objects, and a handler crash surfaces as a protocol error.
+Tools take the native/Jev request as a structured object or as raw JSON text,
+delegate to the same library handlers as the HTTP adapter, and return the
+typed result object as JSON text. The raw-text form lets callers with deeply
+nested payloads bypass the stdio parser's recursion limit: the shared
+evaluator parses the inner bytes and returns its typed rejection. Tool-level
+execution errors are reserved for server startup or protocol failure:
+contract validation and model outcomes arrive as typed result objects, and a
+handler crash surfaces as a protocol error.
 """
 
 import json
@@ -25,22 +28,29 @@ def create_mcp_server(
     """Build the stdio MCP server around the three library handlers (all required)."""
     server: FastMCP = FastMCP("local-judge")
 
-    def _body(handler: Handler, request: dict) -> str:
-        status, payload = handler(json.dumps(request, ensure_ascii=False).encode("utf-8"))
+    def _body(handler: Handler, request: dict | str) -> str:
+        if isinstance(request, str):
+            raw = request.encode("utf-8")
+        else:
+            try:
+                raw = json.dumps(request, ensure_ascii=False).encode("utf-8")
+            except (RecursionError, TypeError, ValueError):
+                raw = b""
+        status, payload = handler(raw)
         return json.dumps(payload, ensure_ascii=False)
 
     @server.tool
-    def local_judge_evaluate(request: dict) -> str:
+    def local_judge_evaluate(request: dict | str) -> str:
         """Evaluate a native v1 envelope and return the native result object."""
         return _body(native_evaluator, request)
 
     @server.tool
-    def local_judge_replay(request: dict) -> str:
+    def local_judge_replay(request: dict | str) -> str:
         """Replay one self-contained inline trace and return the native result object."""
         return _body(replay_evaluator, request)
 
     @server.tool
-    def local_judge_evaluate_jev(request: dict) -> str:
+    def local_judge_evaluate_jev(request: dict | str) -> str:
         """Evaluate a documented Jev-shaped input map and return the adapter result object."""
         return _body(jev_evaluator, request)
 
