@@ -11,7 +11,7 @@ in-memory; nothing is persisted.
 import time
 import uuid
 from dataclasses import dataclass, replace
-from typing import Any, Mapping, Sequence
+from typing import Any, Callable, Mapping, Sequence
 
 from local_judge.canonical import canonical_request_hash
 from local_judge.errors import ErrorObject
@@ -68,13 +68,19 @@ class SamplingOrchestrator:
         backend: str,
         local_runtime_version: str = "local-judge",
         model_digest: str | None = None,
+        executor_factory: Callable[[Mapping[str, Any]], Any] | None = None,
+        parent_trace_id: str | None = None,
     ) -> None:
+        if executor is None and executor_factory is None:
+            raise ValueError("an executor or executor_factory is required")
         self._port = port
         self._executor = executor
+        self._executor_factory = executor_factory
         self._versions = dict(versions)
         self._backend = backend
         self._local_runtime_version = local_runtime_version
         self._model_digest = model_digest
+        self._parent_trace_id = parent_trace_id
 
     def run_questions(self, envelope: RequestEnvelope) -> dict[str, ResultEntry]:
         results = {}
@@ -87,18 +93,29 @@ class SamplingOrchestrator:
         rendered_messages: list = []
         attempt_records: list = []
         try:
-            messages = self._executor.render_messages(question_id, question, envelope.state)
+            executor = (
+                self._executor_factory(question)
+                if self._executor_factory is not None
+                else self._executor
+            )
+            messages = executor.render_messages(question_id, question, envelope.state)
             rendered_messages = list(messages)
             attempt_records: list[AttemptRecord] = []
+            output_schema_factory = getattr(executor, "output_schema", None)
+            response_schema = output_schema_factory(question) if callable(output_schema_factory) else None
             for _ in range(envelope.inference.sample_count):
-                raw = self._port.attempt(
-                    envelope.model,
-                    messages,
-                    envelope.inference,
-                )
+                if response_schema is None:
+                    raw = self._port.attempt(envelope.model, messages, envelope.inference)
+                else:
+                    raw = self._port.attempt(
+                        envelope.model,
+                        messages,
+                        envelope.inference,
+                        response_schema=response_schema,
+                    )
                 # incremental: evidence from earlier samples survives later failures
-                attempt_records.append(self._executor.classify(raw))
-            result = self._executor.run(question_id, question, envelope.state, tuple(attempt_records))
+                attempt_records.append(executor.classify(raw))
+            result = executor.run(question_id, question, envelope.state, tuple(attempt_records))
         except Exception as exc:  # isolation: one question never aborts its siblings
             return self._question_error_fallback(
                 envelope, question_id, question, accepted_request, exc,
@@ -112,13 +129,24 @@ class SamplingOrchestrator:
             rendered_messages=rendered_messages,
             aggregate=result.answer,
             trace_id=result.trace.trace_id,
+            parent_trace_id=self._parent_trace_id,
         )
         return replace(result, trace=trace)
 
-    def _build_trace(self, envelope, question, accepted_request, attempts, rendered_messages, aggregate, trace_id):
+    def _build_trace(
+        self,
+        envelope,
+        question,
+        accepted_request,
+        attempts,
+        rendered_messages,
+        aggregate,
+        trace_id,
+        parent_trace_id,
+    ):
         return TraceRecord(
             trace_id=trace_id,
-            parent_trace_id=None,
+            parent_trace_id=parent_trace_id,
             trace_schema_version="v1",
             contract_version="v1",
             prompt_template_version=self._versions["prompt_template_version"],
@@ -159,7 +187,7 @@ class SamplingOrchestrator:
         """Isolation boundary: an executor crash becomes that question's error only."""
         trace = TraceRecord(
             trace_id=str(uuid.uuid4()),
-            parent_trace_id=None,
+            parent_trace_id=self._parent_trace_id,
             trace_schema_version="v1",
             contract_version="v1",
             prompt_template_version=self._versions["prompt_template_version"],

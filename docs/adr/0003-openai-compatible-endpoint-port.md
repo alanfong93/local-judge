@@ -37,6 +37,10 @@ deployment-owned choice.
 5. Ollama remains the local adapter with unchanged loopback-only validation.
    The endpoint adapter permits local and remote endpoints; docs disclose
    that a configured endpoint may receive judged data and incur charges.
+6. The trace `backend` value for this adapter includes a non-secret SHA-256
+   fingerprint of the canonical `{base_url, response_format}` profile fields.
+   The API key is excluded. Replay requires a matching fingerprint before
+   issuing a request.
 
 ## Alternatives rejected
 
@@ -69,6 +73,9 @@ deployment-owned choice.
   is an explicit profile field (`json_schema` default, `json_object`
   fallback) with no silent downgrade; local typed-output validation remains
   authoritative either way.
+- Changing a profile's base URL or response-format mode makes earlier traces
+  unreplayable under that profile; replay rejects them instead of sending their
+  prompts to a different endpoint.
 - A configured endpoint may receive judged data and may bill for it; the
   README and product docs must keep disclosing this so the local-first
   promise stays honest.

@@ -104,7 +104,7 @@ class RequestValidator:
         if isinstance(raw, Mapping):
             try:
                 raw = json.dumps(raw, ensure_ascii=False, allow_nan=False).encode("utf-8")
-            except (TypeError, ValueError, OverflowError):
+            except (RecursionError, TypeError, ValueError, OverflowError):
                 raise StructuralError(
                     StructuralCode.MALFORMED_JSON, "the request mapping is not JSON-representable"
                 ) from None
@@ -128,7 +128,7 @@ class RequestValidator:
                 parse_constant=_reject_constant,
                 parse_float=_strict_float,
             )
-        except (UnicodeDecodeError, ValueError):
+        except (RecursionError, UnicodeDecodeError, ValueError):
             raise StructuralError(
                 StructuralCode.MALFORMED_JSON, "the raw request cannot be decoded as one JSON value"
             ) from None
@@ -136,7 +136,14 @@ class RequestValidator:
             raise StructuralError(
                 StructuralCode.MALFORMED_JSON, "the request body must be one JSON object"
             )
-        if _contains_lone_surrogates(doc):
+        try:
+            contains_lone_surrogates = _contains_lone_surrogates(doc)
+        except RecursionError:
+            raise StructuralError(
+                StructuralCode.MALFORMED_JSON,
+                "the request nesting exceeds parser limits",
+            ) from None
+        if contains_lone_surrogates:
             raise StructuralError(
                 StructuralCode.MALFORMED_JSON, "the request contains unpaired surrogate characters"
             )

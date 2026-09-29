@@ -55,7 +55,7 @@ class FakePort:
         self.calls = []
 
     def attempt(self, model, rendered_messages, inference, response_schema=None):
-        self.calls.append(model)
+        self.calls.append({"model": model, "response_schema": response_schema})
         raw = self.outputs.pop(0) if self.outputs else "fallback"
         return RawAttempt(outcome=TransportOutcome.OK, output=raw)
 
@@ -134,6 +134,27 @@ class FakeExecutor:
             error=ErrorObject(code="MODEL_TIMEOUT", path="", message="typed outcome"),
             trace=trace,
         )
+
+
+def test_orchestrator_passes_the_question_output_schema_to_the_model_port():
+    class SchemaExecutor(FakeExecutor):
+        def output_schema(self, question):
+            return {"type": "number", "minimum": 0, "maximum": 1}
+
+    port = FakePort(["0.5"])
+    executor = SchemaExecutor()
+    orch = SamplingOrchestrator(
+        port=port,
+        executor=executor,
+        versions=versions(),
+        backend="fake",
+    )
+
+    orch.run_questions(envelope(sample_count=1))
+
+    assert port.calls[0]["response_schema"] == {
+        "type": "number", "minimum": 0, "maximum": 1
+    }
 
 
 def versions():

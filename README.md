@@ -35,7 +35,7 @@ flowchart LR
 
 ## Scope
 
-**In:** the documented Jev-compatible evaluation contract, question-specific validation, sample-based agreement, Ollama and OpenAI-compatible model adapters, the HTTP / MCP / library faces, and a spec test suite.
+**In:** the documented Jev-compatible evaluation contract, question-specific validation, sample-based agreement, Ollama and OpenAI-compatible model adapters, the HTTP / MCP / library faces, one container image for HTTP and MCP stdio, and a spec test suite.
 
 **Out, for now:** text generation, model training/fine-tuning, speed or calibration parity with hosted decision models, multi-tenancy, a hosted service.
 
@@ -67,6 +67,31 @@ base URL (commonly ending in `/v1`) and the model ID it expects. The default
 `response_format="json_object"` when only JSON mode is supported. Local
 validation remains authoritative. Remote endpoints receive the prompt and
 state; locality and billing depend on the configured service.
+
+## Run as a container
+
+Copy `.env.example` to `.env`, set `LOCAL_JUDGE_MODEL_IDS` to the model IDs
+shown by Open WebUI, and set `LOCAL_JUDGE_API_KEY` to an Open WebUI API key.
+Then start the HTTP service:
+
+```sh
+docker compose up --build
+```
+
+The HTTP API is available on host port 8000. Compose publishes it on all host
+interfaces and the API has no authentication, so use it only on a trusted LAN.
+Host clients use `http://localhost:8000`; n8n running in Docker can use
+`http://host.docker.internal:8000`.
+
+For an MCP client that launches stdio processes, use the same image and
+configuration:
+
+```sh
+docker compose run --rm -i local-judge mcp
+```
+
+The container reaches Open WebUI through `host.docker.internal:3040`; it does
+not bundle a model server or join Open WebUI's Docker network.
 
 ## Not affiliated
 

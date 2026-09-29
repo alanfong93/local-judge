@@ -6,6 +6,12 @@ validation and model outcomes arrive as typed result objects (JSON text).
 
 import asyncio
 import json
+import os
+import queue
+import subprocess
+import sys
+import threading
+import time
 
 import pytest
 from fastmcp import Client
@@ -142,6 +148,148 @@ def test_handler_crash_surfaces_as_a_protocol_error_not_a_typed_result():
     server = make_server(native=crashing)
     with pytest.raises(ToolError):
         call_tool(server, "local_judge_evaluate", {"request": {"contract_version": "v1"}})
+
+
+def test_unpaired_surrogate_is_a_typed_malformed_result_instead_of_tool_error():
+    from local_judge.errors import StructuralError
+    from local_judge.models import RejectionResponse
+    from local_judge.validation import RequestValidator
+
+    validator = RequestValidator({})
+    received = []
+
+    def native(raw):
+        received.append(raw)
+        try:
+            validator.parse(raw)
+        except StructuralError as exc:
+            return 400, RejectionResponse(None, None, exc.error).to_dict()
+        raise AssertionError("expected malformed JSON rejection")
+
+    server = make_server(native=native)
+    request = {
+        "request": {
+            "contract_version": "v1",
+            "state": chr(0xD800),
+            "model": "qwen3:8b",
+            "policy": {"version": "p"},
+            "inference": {},
+            "questions": {"q": {"type": "noul", "instructions": "x"}},
+        }
+    }
+    try:
+        body = call_tool(server, "local_judge_evaluate", request)
+    except Exception:
+        body = None
+
+    assert body is not None, "MCP serialization failures must reach the shared typed rejection"
+    payload = json.loads(body)
+    assert payload["error"]["code"] == "MALFORMED_JSON"
+    assert received == [b""]
+
+
+def test_deep_stdio_request_returns_a_typed_malformed_result():
+    repo_root = os.path.dirname(os.path.dirname(__file__))
+    env = os.environ.copy()
+    env.update({
+        "LOCAL_JUDGE_ENDPOINT_BASE_URL": "http://127.0.0.1:1/api",
+        "LOCAL_JUDGE_MODEL_IDS": "qwen3:8b",
+        "LOCAL_JUDGE_API_KEY": "",
+        "LOCAL_JUDGE_RESPONSE_FORMAT": "json_schema",
+        "LOCAL_JUDGE_HTTP_PORT": "8000",
+    })
+    source_root = os.path.join(repo_root, "src")
+    env["PYTHONPATH"] = source_root + os.pathsep + env.get("PYTHONPATH", "")
+    process = subprocess.Popen(
+        [sys.executable, "-m", "local_judge.deployment", "mcp"],
+        cwd=repo_root,
+        env=env,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        text=True,
+        encoding="utf-8",
+        bufsize=1,
+    )
+    messages = queue.Queue()
+    seen_stdout: list[str] = []
+
+    def read_stdout():
+        for line in process.stdout:
+            seen_stdout.append(line)
+            messages.put(line)
+
+    threading.Thread(target=read_stdout, daemon=True).start()
+
+    def read_response(request_id, timeout=15):
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            try:
+                line = messages.get(timeout=max(0.1, deadline - time.monotonic()))
+            except queue.Empty:
+                return None
+            try:
+                message = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if message.get("id") == request_id:
+                return message
+        return None
+
+    try:
+        initialize = {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": {
+                "protocolVersion": "2025-03-26",
+                "capabilities": {},
+                "clientInfo": {"name": "depth-regression", "version": "1"},
+            },
+        }
+        process.stdin.write(json.dumps(initialize) + "\n")
+        process.stdin.flush()
+        assert read_response(1) is not None, "MCP stdio server should initialize"
+        process.stdin.write('{"jsonrpc":"2.0","method":"notifications/initialized"}\n')
+        depth = 5000
+        nested_state = "[" * depth + "0" + "]" * depth
+        request = (
+            '{"contract_version":"v1","state":'
+            + nested_state
+            + ',"model":"qwen3:8b","policy":{"version":"p"},'
+            + '"inference":{},"questions":{"q":{"type":"noul","instructions":"x"}}}'
+        )
+        call = (
+            '{"jsonrpc":"2.0","id":2,"method":"tools/call",'
+            + '"params":{"name":"local_judge_evaluate","arguments":{"request":'
+            + json.dumps(request)
+            + '}}}'
+        )
+        process.stdin.write(call + "\n")
+        process.stdin.flush()
+        response = read_response(2)
+        assert response is not None, "deep MCP input should receive a JSON-RPC response"
+        assert "error" not in response, "deep MCP input should return a typed tool result"
+        text = response["result"]["content"][0]["text"]
+        assert json.loads(text)["error"]["code"] == "MALFORMED_JSON"
+        try:
+            messages.get(timeout=1)
+        except queue.Empty:
+            pass
+        for line in seen_stdout:
+            try:
+                message = json.loads(line)
+            except json.JSONDecodeError:
+                raise AssertionError(f"stdout carried a non-JSON line: {line!r}")
+            assert message.get("jsonrpc") == "2.0", f"stdout carried a non-JSON-RPC message: {line!r}"
+    finally:
+        if process.stdin:
+            process.stdin.close()
+        try:
+            process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            process.terminate()
+            process.wait(timeout=5)
 
 
 def test_main_builds_a_fail_closed_stdio_server():

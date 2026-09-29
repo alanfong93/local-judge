@@ -26,5 +26,43 @@ The local stdio FastMCP server exposes three thin tools:
 
 Tool-level execution errors are reserved for server startup or protocol failure.
 Contract validation and model outcomes are returned as typed result objects.
-Each tool receives the request wrapped as `{"request": <request object>}` and
-returns the typed result object as JSON text.
+Each tool receives the request wrapped as `{"request": <request or raw JSON
+text>}` and returns the typed result object as JSON text.
+
+### Request forms
+
+The `request` argument accepts either form:
+
+- **Object** — the request as a structured object. Ordinary requests use this
+  form; it behaves exactly as before this union existed.
+- **Raw JSON text** — the request serialized to a JSON string. The string's
+  bytes go straight to the shared evaluator, which owns parsing, the 256 KiB
+  limit, and structural rejection. The text form therefore behaves exactly
+  like an HTTP request body, including the documented duplicate-member
+  detection (`docs/CONTRACT.md`); an object cannot express duplicate members
+  because a JSON-RPC object argument is already a mapping.
+
+Deeply nested requests **must** use the raw-text form. The stdio transport
+parses the whole JSON-RPC message before a tool runs, so a deeply nested
+object can exceed that parser's recursion limit before local-judge sees it;
+the message is then dropped with no response (ADR 0005). As text, the outer
+parser sees only a string, and the shared evaluator returns the typed
+`MALFORMED_JSON` result without a model call.
+
+Consumer example — deep request as raw text:
+
+```python
+import json
+
+from fastmcp import Client
+
+envelope = {"contract_version": "v1", "state": deep_state, "model": "qwen3:8b",
+            "policy": {"version": "p"}, "inference": {},
+            "questions": {"q": {"type": "noul", "instructions": "x"}}}
+
+async with Client(server) as client:
+    result = await client.call_tool("local_judge_evaluate", {"request": json.dumps(envelope)})
+```
+
+`local_judge_replay` and `local_judge_evaluate_jev` take their envelopes in
+the same two forms and keep their existing typed result shapes.

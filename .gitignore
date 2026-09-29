@@ -1,4 +1,5 @@
 .dev-loop-state.json
+.env
 __pycache__/
 *.pyc
 *.egg-info/
