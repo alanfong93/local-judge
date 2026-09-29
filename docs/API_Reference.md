@@ -37,7 +37,10 @@ The `request` argument accepts either form:
   form; it behaves exactly as before this union existed.
 - **Raw JSON text** — the request serialized to a JSON string. The string's
   bytes go straight to the shared evaluator, which owns parsing, the 256 KiB
-  limit, and structural rejection.
+  limit, and structural rejection. The text form therefore behaves exactly
+  like an HTTP request body, including the documented duplicate-member
+  detection (`docs/CONTRACT.md`); an object cannot express duplicate members
+  because a JSON-RPC object argument is already a mapping.
 
 Deeply nested requests **must** use the raw-text form. The stdio transport
 parses the whole JSON-RPC message before a tool runs, so a deeply nested

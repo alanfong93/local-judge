@@ -212,9 +212,11 @@ def test_deep_stdio_request_returns_a_typed_malformed_result():
         bufsize=1,
     )
     messages = queue.Queue()
+    seen_stdout: list[str] = []
 
     def read_stdout():
         for line in process.stdout:
+            seen_stdout.append(line)
             messages.put(line)
 
     threading.Thread(target=read_stdout, daemon=True).start()
@@ -270,6 +272,16 @@ def test_deep_stdio_request_returns_a_typed_malformed_result():
         assert "error" not in response, "deep MCP input should return a typed tool result"
         text = response["result"]["content"][0]["text"]
         assert json.loads(text)["error"]["code"] == "MALFORMED_JSON"
+        try:
+            messages.get(timeout=1)
+        except queue.Empty:
+            pass
+        for line in seen_stdout:
+            try:
+                message = json.loads(line)
+            except json.JSONDecodeError:
+                raise AssertionError(f"stdout carried a non-JSON line: {line!r}")
+            assert message.get("jsonrpc") == "2.0", f"stdout carried a non-JSON-RPC message: {line!r}"
     finally:
         if process.stdin:
             process.stdin.close()
