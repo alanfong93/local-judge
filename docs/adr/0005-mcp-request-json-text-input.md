@@ -47,3 +47,36 @@ ordinary object form remains supported for typical requests.
   limits.
 - The API reference and stdio regression tests must cover both forms, including
   a real deep-input MCP call returning a typed result without invoking a model.
+
+## Decision addendum: MCP serialization failures
+
+Accepted by Alan during Plan-Loop on 2026-09-30, issue #46.
+
+When an MCP request value reaches the tool wrapper but cannot be serialized or
+encoded as UTF-8 JSON, the wrapper returns the tool-specific typed
+`MALFORMED_JSON` result before invoking the supplied handler. The error object
+is `{code: "MALFORMED_JSON", path: "", message: "the MCP request could not be
+serialized as UTF-8 JSON"}`. Native and replay tools use the rejection envelope
+with `contract_version: null`, `model: null`, `status: "rejected"`, and empty
+`results`; the Jev tool uses `answers: null` and `local_judge: null`. The input
+and exception text are never echoed. This intentionally changes the custom
+handler callback contract for serialization failures: those handlers are not
+called.
+
+The conversion boundary is limited to `json.dumps(..., ensure_ascii=False)`
+and UTF-8 encoding for object arguments, or UTF-8 encoding for raw-text
+arguments. Only `RecursionError`, `TypeError`, and `ValueError` from those
+conversions (including `UnicodeEncodeError`) are normalized. Existing
+`json.dumps` options and successfully serialized values, including non-finite
+numbers, remain unchanged; handler exceptions and output-serialization errors
+are not caught by this branch.
+
+A successfully encoded raw JSON string, including an empty string, continues
+to the handler unchanged. Custom handlers retain responsibility for the result
+of such input. Encoded but malformed raw JSON also continues to the handler.
+The fail-closed default Jev handler returns its typed malformed-input envelope
+for empty or malformed raw text. Handler exceptions and result serialization
+failures remain tool-level errors. This addendum does not change pre-dispatch
+FastMCP JSON-RPC parsing; deeply nested MCP objects must still use the raw-text
+request form above, and successfully serialized values retain the existing
+`json.dumps` behavior.
