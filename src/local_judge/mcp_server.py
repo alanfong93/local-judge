@@ -4,10 +4,14 @@ Tools take the native/Jev request as a structured object or as raw JSON text,
 delegate to the same library handlers as the HTTP adapter, and return the
 typed result object as JSON text. The raw-text form lets callers with deeply
 nested payloads bypass the stdio parser's recursion limit: the shared
-evaluator parses the inner bytes and returns its typed rejection. Tool-level
-execution errors are reserved for server startup or protocol failure:
-contract validation and model outcomes arrive as typed result objects, and a
-handler crash surfaces as a protocol error.
+evaluator parses the inner bytes and returns its typed rejection. A request
+that cannot be converted for evaluation (an object that is not JSON
+representable, or raw text that is not encodable UTF-8) is answered by the
+tool itself with a typed rejection and its handler is not invoked;
+successfully encoded requests — including empty raw text — are always
+delegated. Tool-level execution errors are reserved for server startup or
+protocol failure: contract validation and model outcomes arrive as typed
+result objects, and a handler crash surfaces as a protocol error.
 """
 
 import json
@@ -19,6 +23,24 @@ from fastmcp import FastMCP
 
 Handler = Callable[[bytes], "tuple[int, dict]"]
 
+_CONVERSION_FAILURE_MESSAGE = "the MCP request could not be serialized as UTF-8 JSON"
+
+
+def _conversion_rejection(envelope: str) -> dict:
+    """The typed MALFORMED_JSON result for one tool's failed request conversion."""
+    error = ErrorObject(
+        code="MALFORMED_JSON", path="", message=_CONVERSION_FAILURE_MESSAGE
+    ).to_dict()
+    if envelope == "jev":
+        return {"answers": None, "local_judge": None, "error": error}
+    return {
+        "contract_version": None,
+        "model": None,
+        "status": "rejected",
+        "results": {},
+        "error": error,
+    }
+
 
 def create_mcp_server(
     native_evaluator: Handler,
@@ -28,31 +50,31 @@ def create_mcp_server(
     """Build the stdio MCP server around the three library handlers (all required)."""
     server: FastMCP = FastMCP("local-judge")
 
-    def _body(handler: Handler, request: dict | str) -> str:
-        if isinstance(request, str):
-            raw = request.encode("utf-8")
-        else:
-            try:
+    def _body(handler: Handler, request: dict | str, envelope: str) -> str:
+        try:
+            if isinstance(request, str):
+                raw = request.encode("utf-8")
+            else:
                 raw = json.dumps(request, ensure_ascii=False).encode("utf-8")
-            except (RecursionError, TypeError, ValueError):
-                raw = b""
+        except (RecursionError, TypeError, ValueError):
+            return json.dumps(_conversion_rejection(envelope), ensure_ascii=False)
         status, payload = handler(raw)
         return json.dumps(payload, ensure_ascii=False)
 
     @server.tool
     def local_judge_evaluate(request: dict | str) -> str:
         """Evaluate a native v1 envelope and return the native result object."""
-        return _body(native_evaluator, request)
+        return _body(native_evaluator, request, "native")
 
     @server.tool
     def local_judge_replay(request: dict | str) -> str:
         """Replay one self-contained inline trace and return the native result object."""
-        return _body(replay_evaluator, request)
+        return _body(replay_evaluator, request, "native")
 
     @server.tool
     def local_judge_evaluate_jev(request: dict | str) -> str:
         """Evaluate a documented Jev-shaped input map and return the adapter result object."""
-        return _body(jev_evaluator, request)
+        return _body(jev_evaluator, request, "jev")
 
     return server
 
@@ -63,8 +85,9 @@ def build_default_server(model_profiles=None):
     Every native evaluation therefore rejects with UNSUPPORTED_LOCAL_MODEL,
     every replay rejects with REPLAY_CONFIGURATION_UNAVAILABLE (no versioned
     artifacts are wired), and the Jev adapter validates input structurally
-    before refusing on the model. Deployments with configured profiles wire
-    their own handlers via create_mcp_server.
+    before refusing on the model; undecodable Jev input gets the typed
+    malformed-input result instead of a protocol error. Deployments with
+    configured profiles wire their own handlers via create_mcp_server.
     """
     from local_judge.adapter import JevAdapter
     from local_judge.models import RejectionResponse
@@ -103,7 +126,20 @@ def build_default_server(model_profiles=None):
         return 409, unavailable.to_dict()
 
     def jev(raw):
-        return 400, adapter.evaluate(json.loads(raw.decode("utf-8")), None)
+        try:
+            jev_input = json.loads(raw.decode("utf-8"))
+        except (RecursionError, TypeError, ValueError):
+            malformed = {
+                "answers": None,
+                "local_judge": None,
+                "error": ErrorObject(
+                    code="MALFORMED_JSON",
+                    path="",
+                    message="the raw request cannot be decoded as one JSON value",
+                ).to_dict(),
+            }
+            return 400, malformed
+        return 400, adapter.evaluate(jev_input, None)
 
     return create_mcp_server(
         native_evaluator=native,
