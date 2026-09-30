@@ -15,6 +15,7 @@ import time
 
 import pytest
 from fastmcp import Client
+from hypothesis import given, strategies as st
 
 from local_judge.mcp_server import create_mcp_server
 
@@ -150,23 +151,38 @@ def test_handler_crash_surfaces_as_a_protocol_error_not_a_typed_result():
         call_tool(server, "local_judge_evaluate", {"request": {"contract_version": "v1"}})
 
 
-def test_unpaired_surrogate_is_a_typed_malformed_result_instead_of_tool_error():
-    from local_judge.errors import StructuralError
-    from local_judge.models import RejectionResponse
-    from local_judge.validation import RequestValidator
+NATIVE_CONVERSION_REJECTION = {
+    "contract_version": None,
+    "model": None,
+    "status": "rejected",
+    "results": {},
+    "error": {
+        "code": "MALFORMED_JSON",
+        "path": "",
+        "message": "the MCP request could not be serialized as UTF-8 JSON",
+    },
+}
 
-    validator = RequestValidator({})
-    received = []
+JEV_CONVERSION_REJECTION = {
+    "answers": None,
+    "local_judge": None,
+    "error": NATIVE_CONVERSION_REJECTION["error"],
+}
 
-    def native(raw):
-        received.append(raw)
-        try:
-            validator.parse(raw)
-        except StructuralError as exc:
-            return 400, RejectionResponse(None, None, exc.error).to_dict()
-        raise AssertionError("expected malformed JSON rejection")
 
-    server = make_server(native=native)
+def test_object_conversion_failure_returns_the_typed_rejection_without_the_handler():
+    """An unserializable object is answered by the tool; the handler never runs.
+
+    An unpaired surrogate survives FastMCP's argument validation but cannot be
+    encoded, so it is the reachable object-form conversion failure.
+    """
+    seen = []
+
+    def recording(raw):
+        seen.append(raw)
+        return 200, COMPLETED
+
+    server = make_server(native=recording, replay=recording, jev=recording)
     request = {
         "request": {
             "contract_version": "v1",
@@ -177,15 +193,107 @@ def test_unpaired_surrogate_is_a_typed_malformed_result_instead_of_tool_error():
             "questions": {"q": {"type": "noul", "instructions": "x"}},
         }
     }
-    try:
-        body = call_tool(server, "local_judge_evaluate", request)
-    except Exception:
-        body = None
 
-    assert body is not None, "MCP serialization failures must reach the shared typed rejection"
-    payload = json.loads(body)
-    assert payload["error"]["code"] == "MALFORMED_JSON"
-    assert received == [b""]
+    native_payload = json.loads(call_tool(server, "local_judge_evaluate", request))
+    replay_payload = json.loads(call_tool(server, "local_judge_replay", request))
+    jev_payload = json.loads(call_tool(server, "local_judge_evaluate_jev", request))
+
+    assert native_payload == NATIVE_CONVERSION_REJECTION
+    assert replay_payload == NATIVE_CONVERSION_REJECTION
+    assert jev_payload == JEV_CONVERSION_REJECTION
+    assert seen == []
+
+
+def test_unencodable_raw_text_returns_the_typed_rejection_without_the_handler():
+    seen = []
+
+    def recording(raw):
+        seen.append(raw)
+        return 200, COMPLETED
+
+    server = make_server(native=recording)
+
+    body = call_tool(server, "local_judge_evaluate", {"request": chr(0xD800)})
+
+    assert json.loads(body) == NATIVE_CONVERSION_REJECTION
+    assert seen == []
+
+
+@given(st.text(max_size=20), st.booleans())
+def test_raw_text_reaches_the_handler_exactly_when_it_is_utf8_encodable(text, inject_surrogate):
+    candidate = text + ("\ud800" if inject_surrogate else "")
+    seen = []
+
+    def recording(raw):
+        seen.append(raw)
+        return 200, {"raw_length": len(raw)}
+
+    server = make_server(native=recording)
+    body = json.loads(call_tool(server, "local_judge_evaluate", {"request": candidate}))
+
+    try:
+        expected = candidate.encode("utf-8")
+    except UnicodeEncodeError:
+        expected = None
+
+    if expected is None:
+        assert body == NATIVE_CONVERSION_REJECTION
+        assert seen == []
+    else:
+        assert seen == [expected]
+        assert body == {"raw_length": len(expected)}
+
+
+def test_empty_and_malformed_raw_text_are_delegated_to_the_handler():
+    seen = []
+    handler_result = {
+        "answers": None,
+        "local_judge": None,
+        "error": {"code": "MALFORMED_JSON", "path": "", "message": "handler decision"},
+    }
+
+    def recording(raw):
+        seen.append(raw)
+        return 400, handler_result
+
+    server = make_server(native_handler(COMPLETED), jev=recording)
+
+    empty = json.loads(call_tool(server, "local_judge_evaluate_jev", {"request": ""}))
+    malformed = json.loads(call_tool(server, "local_judge_evaluate_jev", {"request": "not json"}))
+
+    assert empty == handler_result
+    assert malformed == handler_result
+    assert seen == [b"", b"not json"]
+
+
+def test_non_finite_numbers_still_serialize_to_the_handler():
+    """Tool-argument validation normalizes non-finite floats to null before the
+    wrapper runs; the converted value keeps reaching the handler unchanged."""
+    seen = []
+
+    def recording(raw):
+        seen.append(raw)
+        return 200, COMPLETED
+
+    server = make_server(native=recording)
+
+    body = call_tool(server, "local_judge_evaluate", {"request": {"state": float("nan")}})
+
+    assert json.loads(body) == COMPLETED
+    assert seen == [b'{"state": null}']
+
+
+def test_fail_closed_jev_handler_answers_undecodable_input_with_a_typed_result():
+    from local_judge.mcp_server import build_default_server
+
+    server = build_default_server()
+
+    for raw_text in ("", "not json"):
+        body = json.loads(call_tool(server, "local_judge_evaluate_jev", {"request": raw_text}))
+        assert body["answers"] is None
+        assert body["local_judge"] is None
+        assert body["error"]["code"] == "MALFORMED_JSON"
+        assert body["error"]["message"] == "the raw request cannot be decoded as one JSON value"
 
 
 def test_deep_stdio_request_returns_a_typed_malformed_result():

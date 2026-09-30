@@ -66,3 +66,26 @@ async with Client(server) as client:
 
 `local_judge_replay` and `local_judge_evaluate_jev` take their envelopes in
 the same two forms and keep their existing typed result shapes.
+
+### MCP serialization failures
+
+If a request value reaches a tool but cannot be serialized or encoded as UTF-8
+JSON, the MCP wrapper returns a typed `MALFORMED_JSON` result without calling
+its evaluator handler. The error object has `code: "MALFORMED_JSON"`,
+`path: ""`, and `message: "the MCP request could not be serialized as UTF-8
+JSON"`. Native and replay tools return the native rejected envelope with null
+`contract_version` and `model`, empty `results`, and that error. The Jev tool
+returns `answers: null`, `local_judge: null`, and that error. The input and
+exception text are never echoed.
+
+This branch is limited to failures while converting the tool argument to UTF-8
+JSON: the `json.dumps(..., ensure_ascii=False).encode("utf-8")` conversion for
+objects or `.encode("utf-8")` for raw-text strings. Only `RecursionError`,
+`TypeError`, and `ValueError` raised during those conversions are normalized
+this way (`UnicodeEncodeError` is a `ValueError`). Existing `json.dumps`
+options and successfully serialized values, including non-finite numbers, are
+unchanged. It intentionally does not call a custom evaluator handler. A
+successfully encoded empty raw-text request is different: it is passed to the
+handler as `b""`, so a custom handler retains control of its empty-body
+behavior. Encoded but malformed raw JSON is also passed to the handler. Handler
+failures and result-serialization failures remain tool-level errors.
