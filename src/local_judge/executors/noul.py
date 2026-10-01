@@ -12,11 +12,12 @@ from local_judge.executors.base import NativeTypeExecutor
 
 
 class NoulExecutor(NativeTypeExecutor):
-    def __init__(self, criteria=None) -> None:
+    def __init__(self, criteria=None, versions=None) -> None:
         super().__init__(
             question_type="noul",
             criteria=criteria,
             aggregate=self.aggregate_from_parsed,
+            versions=versions,
         )
 
     def aggregate_from_parsed(self, parsed_samples: list) -> dict:

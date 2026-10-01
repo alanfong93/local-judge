@@ -11,7 +11,7 @@ from local_judge.executors.base import NativeTypeExecutor
 
 
 class ScoreExecutor(NativeTypeExecutor):
-    def __init__(self, criteria) -> None:
+    def __init__(self, criteria, versions=None) -> None:
         if not isinstance(criteria, list):
             raise ValueError("score criteria must be an ordered array of 2 through 10 values")
         rubric = list(criteria)
@@ -23,6 +23,7 @@ class ScoreExecutor(NativeTypeExecutor):
             question_type="score",
             criteria=rubric,
             aggregate=self.aggregate_from_parsed,
+            versions=versions,
         )
 
     def aggregate_from_parsed(self, parsed_samples: list) -> dict:

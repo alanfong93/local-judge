@@ -4,7 +4,7 @@ import json
 from unittest.mock import patch
 
 import pytest
-from hypothesis import given, strategies as st
+from hypothesis import given, settings, strategies as st
 
 from fastapi.testclient import TestClient
 from conftest import validate_against
@@ -176,6 +176,65 @@ def test_runtime_model_allowlist_rejects_unknown_id_before_endpoint_call():
     assert port.calls == []
 
 
+@pytest.mark.parametrize("first_output", [
+    '{"reason":"INSUFFICIENT_EVIDENCE"}',
+    '{"reason":"AMBIGUOUS_EVIDENCE"}',
+    '{"reason":"UNSUPPORTED_QUESTION"}',
+    '"not-in-menu"',
+])
+def test_terminal_sample_stops_question_without_stopping_siblings(first_output):
+    port = ScriptedPort([first_output, '"billing"', '"billing"', '"billing"'])
+    runtime = deployment_runtime(port)
+    request = native_request(CHOICE, sample_count=3)
+    request["questions"]["sibling"] = CHOICE
+
+    status, result = runtime.native_evaluator(json_bytes(request))
+
+    assert status == 200
+    failed = result["results"]["q"]
+    assert failed["status"] != "answered"
+    assert failed["answer"] is None and failed["agreement"] is None
+    assert failed["requested_samples"] == 3
+    assert len(failed["trace"]["attempts"]) == 1
+    assert result["results"]["sibling"]["answer"]["choice"] == "billing"
+    assert len(result["results"]["sibling"]["trace"]["attempts"]) == 3
+    assert len(port.calls) == 4
+
+
+def test_terminal_sample_preserves_prior_attempts_and_requested_count():
+    port = ScriptedPort(['"billing"', '{"reason":"AMBIGUOUS_EVIDENCE"}'])
+    status, result = deployment_runtime(port).native_evaluator(
+        json_bytes(native_request(CHOICE, sample_count=3))
+    )
+    entry = result["results"]["q"]
+    assert status == 200 and entry["status"] == "inability_to_answer"
+    assert entry["requested_samples"] == 3
+    assert entry["answer"] is None
+    assert len(entry["trace"]["attempts"]) == 2
+    assert entry["trace"]["attempts"][0]["parsed_value"] == "billing"
+    assert len(port.calls) == 2
+
+
+@pytest.mark.parametrize("outcome", [TransportOutcome.TIMEOUT, TransportOutcome.UNAVAILABLE])
+def test_terminal_transport_failure_stops_remaining_samples(outcome):
+    class FailingPort:
+        calls = 0
+
+        def attempt(self, *args, **kwargs):
+            self.calls += 1
+            return RawAttempt(outcome=outcome, output=None)
+
+    port = FailingPort()
+    status, result = deployment_runtime(port).native_evaluator(
+        json_bytes(native_request(CHOICE, sample_count=3))
+    )
+    assert status == 200
+    assert result["results"]["q"]["status"] == "question_error"
+    assert result["results"]["q"]["requested_samples"] == 3
+    assert len(result["results"]["q"]["trace"]["attempts"]) == 1
+    assert port.calls == 1
+
+
 def test_runtime_replay_success_links_parent_trace_and_rejects_unknown_versions():
     port = ScriptedPort(['"billing"', '"billing"'])
     runtime = deployment_runtime(port)
@@ -225,6 +284,51 @@ def test_runtime_replay_success_links_parent_trace_and_rejects_unknown_versions(
     assert len(port.calls) == previous_calls
 
 
+def test_replay_uses_recorded_prompt_for_all_types_after_fresh_prompt_2_requests():
+    questions_and_outputs = (
+        (CHOICE, '"billing"'),
+        ({"type": "score", "instructions": "Rate severity", "criteria": ["Low", "High"]}, "1"),
+        ({"type": "noul", "instructions": "Is this a refund?"}, "0.9"),
+    )
+    port = ScriptedPort([
+        output for _, output in questions_and_outputs for _ in range(3)
+    ])
+    runtime = deployment_runtime(port)
+    old_versions = {
+        "prompt_template_version": "prompt-1",
+        "output_schema_version": "schema-1",
+        "aggregation_version": "a1",
+    }
+
+    for question, _ in questions_and_outputs:
+        request = native_request(question)
+        envelope = runtime.validator.parse(json_bytes(request))
+        old = runtime._run_envelope(envelope, versions=old_versions)["q"].to_dict()
+        old_messages = port.calls[-1]["messages"]
+        assert len(old_messages) == 3
+        assert old["status"] == "answered"
+        assert old["trace"]["prompt_template_version"] == "prompt-1"
+
+        status, fresh = runtime.native_evaluator(json_bytes(request))
+        assert status == 200
+        assert fresh["results"]["q"]["status"] == "answered"
+        assert fresh["results"]["q"]["trace"]["prompt_template_version"] == "prompt-2"
+        assert port.calls[-1]["messages"][:3] == old_messages
+        assert len(port.calls[-1]["messages"]) == 4
+
+        replay_status, replay = runtime.replay_evaluator(json_bytes({
+            "contract_version": "v1",
+            "trace": old["trace"],
+        }))
+        assert replay_status == 200
+        assert replay["results"]["q"]["status"] == "answered"
+        assert port.calls[-1]["messages"] == old_messages
+        assert replay["results"]["q"]["trace"]["prompt_template_version"] == "prompt-1"
+        assert replay["results"]["q"]["trace"]["parent_trace_id"] == old["trace"]["trace_id"]
+
+
+# DeploymentRuntime construction can have variable startup time; this is a shape check.
+@settings(deadline=None)
 @given(
     invalid_version=st.one_of(
         st.none(),

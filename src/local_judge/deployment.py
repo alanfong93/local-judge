@@ -26,7 +26,7 @@ from local_judge.prompt import VersionedPromptCompiler
 from local_judge.validation import MAX_ENCODED_BYTES, ModelProfile, RequestValidator
 
 _VERSIONS = {
-    "prompt_template_version": "prompt-1",
+    "prompt_template_version": "prompt-2",
     "output_schema_version": "schema-1",
     "aggregation_version": "a1",
 }
@@ -174,22 +174,25 @@ class DeploymentRuntime:
         self.model_port = model_port or OpenAICompatibleModelPort(self.profiles)
         compiler = VersionedPromptCompiler()
         self.artifact_registry = {
-            "prompt_templates": {compiler.template_version: compiler},
+            "prompt_templates": {
+                version: VersionedPromptCompiler(template_version=version)
+                for version in ("prompt-1", compiler.template_version)
+            },
             "output_schemas": {compiler.output_schema_version: compiler},
             "aggregations": {"a1": {"version": "a1"}},
             "models": self.profiles,
         }
 
     @staticmethod
-    def _executor_for(question: Mapping[str, Any]):
+    def _executor_for(question: Mapping[str, Any], versions: Mapping[str, str]):
         question_type = question.get("type")
         criteria = question.get("criteria")
         if question_type == "choice":
-            return ChoiceExecutor(criteria)
+            return ChoiceExecutor(criteria, versions=versions)
         if question_type == "score":
-            return ScoreExecutor(criteria)
+            return ScoreExecutor(criteria, versions=versions)
         if question_type == "noul":
-            return NoulExecutor(criteria)
+            return NoulExecutor(criteria, versions=versions)
         raise ValueError(f"unknown question type: {question_type!r}")
 
     def _run_envelope(
@@ -199,11 +202,12 @@ class DeploymentRuntime:
         parent_trace_id: str | None = None,
         versions: Mapping[str, str] | None = None,
     ) -> dict:
+        resolved_versions = dict(versions or _VERSIONS)
         orchestrator = SamplingOrchestrator(
             port=self.model_port,
             executor=None,
-            executor_factory=self._executor_for,
-            versions=dict(versions or _VERSIONS),
+            executor_factory=lambda question: self._executor_for(question, resolved_versions),
+            versions=resolved_versions,
             backend=self.profiles[envelope.model].backend_identity,
             parent_trace_id=parent_trace_id,
         )

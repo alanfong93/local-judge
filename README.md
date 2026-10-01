@@ -8,6 +8,11 @@ Large decision models (like TypeSafe's Jev) showed that software doesn't need a 
 
 **Status: the core, Ollama and OpenAI-compatible model adapters, and Python / HTTP / MCP faces are implemented. Scripted evidence-runner tests are present; representative live-model usefulness evidence has not yet been established.**
 
+The [local container smoke report](docs/deployment-smoke-2026-10-01.md) records
+early live-model refusals and the subsequent prompt-version experiment. It is
+not an acceptance-gate result; do not treat a typed response alone as evidence
+of reliable judgment.
+
 ---
 
 ## The port, not the phone

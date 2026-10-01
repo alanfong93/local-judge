@@ -30,6 +30,13 @@ network join. The HTTP host port is intentionally published on all interfaces;
 it has no authentication and is intended only for the accepted local LAN
 deployment.
 
+Fresh evaluations use prompt artifact `prompt-2`; `prompt-1` remains packaged
+for replay. The deployment forwards the resolved trace versions into each
+typed executor as well as the trace builder, so an older replay sends the old
+messages rather than merely carrying an old label. The prompt keeps engine
+instructions separate from caller policy and serialized state evidence; the
+`prompt-2` engine-owned answer-shape reminder follows the evidence message.
+
 ## Boundary Rules
 
 - Native evaluation uses `POST /v1/evaluations`, MCP `local_judge_evaluate`,

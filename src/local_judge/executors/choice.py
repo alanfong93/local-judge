@@ -11,7 +11,7 @@ from local_judge.executors.base import NativeTypeExecutor
 
 
 class ChoiceExecutor(NativeTypeExecutor):
-    def __init__(self, criteria) -> None:
+    def __init__(self, criteria, versions=None) -> None:
         if not isinstance(criteria, Mapping):
             raise ValueError("choice criteria must be a map of 2 through 255 option ids")
         if not 2 <= len(criteria) <= 255:
@@ -25,6 +25,7 @@ class ChoiceExecutor(NativeTypeExecutor):
             question_type="choice",
             criteria=criteria,
             aggregate=self.aggregate_from_parsed,
+            versions=versions,
         )
 
     def aggregate_from_parsed(self, parsed_samples: list) -> dict | tuple:

@@ -115,6 +115,8 @@ class SamplingOrchestrator:
                     )
                 # incremental: evidence from earlier samples survives later failures
                 attempt_records.append(executor.classify(raw))
+                if attempt_records[-1].terminal_error is not None:
+                    break
             result = executor.run(question_id, question, envelope.state, tuple(attempt_records))
         except Exception as exc:  # isolation: one question never aborts its siblings
             return self._question_error_fallback(
@@ -131,7 +133,7 @@ class SamplingOrchestrator:
             trace_id=result.trace.trace_id,
             parent_trace_id=self._parent_trace_id,
         )
-        return replace(result, trace=trace)
+        return replace(result, trace=trace, requested_samples=envelope.inference.sample_count)
 
     def _build_trace(
         self,

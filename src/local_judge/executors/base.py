@@ -69,7 +69,7 @@ class NativeTypeExecutor:
         self.backend = backend
         self.model = model
         supplied = dict(versions or {})
-        self.template_version = supplied.get("prompt_template_version", "prompt-1")
+        self.template_version = supplied.get("prompt_template_version", "prompt-2")
         self.output_schema_version = supplied.get("output_schema_version", "schema-1")
 
     def versions(self) -> dict:

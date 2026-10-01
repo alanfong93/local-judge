@@ -184,6 +184,16 @@ sample-output union and validates the raw result again locally. These are
 deterministic structural safeguards, not proof that a model will ignore every
 adversarial statement in state.
 
+The initial `prompt-1` artifact sends exactly those three messages. `prompt-2`
+retains them unchanged and adds an engine-owned, type-specific user-message
+reminder **after** the state message. That reminder states the Choice string,
+Score zero-based index, or Noul 0-to-1 truth-probability output shape and
+explicitly treats state instructions and fake roles as evidence only. It never
+interpolates caller policy or state into the reminder. Both artifacts remain
+available for replay; the trace records the prompt version actually sent.
+The output schema remains `schema-1`. Prompt changes are experimental until
+measured against the acceptance evidence gate below.
+
 ## Questions
 
 Question objects are closed. Unknown fields are a per-question
